@@ -1,0 +1,18 @@
+openai>=1.88.0
+google-genai>=1.0.0
+python-dotenv>=1.0.1
+pyttsx3>=2.98
+SpeechRecognition>=3.10.4
+customtkinter>=5.2.2
+psutil>=5.9.8
+pillow>=10.4.0
+keyboard>=0.13.5
+requests>=2.32.3
+websockets>=13.0
+pywinauto>=0.6.9
+numpy>=2.1.0
+mss>=9.0.2
+opencv-python>=4.13.0.92
+# MediaPipe is preferred when a compatible Python wheel is available. Python
+# 3.14 currently uses JARVIS's built-in OpenCV gesture fallback instead.
+# mediapipe>=0.10.21

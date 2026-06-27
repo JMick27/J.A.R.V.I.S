@@ -1,0 +1,35 @@
+# Secrets and local configuration
+.env
+*.env.local
+health_bridge_token.txt
+phone_bridge_token.txt
+jarvis_memory.json
+health_readings.json
+phone_actions.json
+settings.json
+personality.json
+
+# Generated application data
+screenshots/
+comtypes_gen/
+jarvis_engine_profile/
+jarvis_video_profile/
+jarvis_engine_home.html
+jarvis_video_player.html
+.tmp.drive*/
+
+# Python and build output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+node_modules/
+*.spec.bak
+
+# Local tooling
+.agents/
+.codex/
+.idea/
+.vscode/

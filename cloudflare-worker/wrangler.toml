@@ -1,0 +1,8 @@
+name = "jarvis-ai-proxy"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+workers_dev = true
+preview_urls = false
+
+[vars]
+MAX_REQUEST_BYTES = "12582912"
