@@ -59,7 +59,7 @@ server. See `cloudflare-worker/README.md` for deployment.
 The `.env` file should be here:
 
 ```text
-C:\Users\jacks\OneDrive\Documents\JARVIS\.env
+C:\Path\To\JARVIS\.env
 ```
 
 6. Run the app:
@@ -376,7 +376,7 @@ Run the Shortcut after JARVIS queues a mobile request. Keep your iPhone and PC o
 - `I am coding`
 - `Turn off monitoring`
 - `Turn on monitoring`
-- `Watch C:\Users\jacks\OneDrive\Documents\MyProject`
+- `Watch C:\Users\YourName\Documents\MyProject`
 - `Project watcher status`
 - `Turn off project watcher`
 - `Unwatch MyProject`
@@ -489,7 +489,7 @@ Useful commands:
 - `agent take a screenshot then analyze my screen`
 - `use tools open chrome and search web for Python virtual environments`
 - `agent get directions to the nearest grocery store`
-- `tool mode list folder C:\Users\jacks\Downloads`
+- `tool mode list folder C:\Users\YourName\Downloads`
 - `action history`
 
 ## JARVIS Polish Layer
@@ -501,7 +501,7 @@ On launch, JARVIS runs a short startup sequence showing and optionally speaking 
 - Vision system status
 - Mouse control safe mode
 - Gemini connection status
-- Time-aware greeting for Jackson
+- Time-aware greeting using the name entered during first-run setup
 
 After the technical boot animation, JARVIS can show a separate animated welcome screen before revealing the main UI. It is a first-run experience: `welcome_screen_enabled` controls whether it is allowed, and `welcome_screen_seen` is set to `true` after it plays once.
 
@@ -620,7 +620,7 @@ To customize app launching, edit `custom_app_paths` in `settings.json`. Use the 
 
 ```json
 "custom_app_paths": {
-  "godot": "C:\\Users\\jacks\\Downloads\\Godot_v4.4.1-stable_win64.exe",
+  "godot": "C:\\Users\\YourName\\Downloads\\Godot_v4.4.1-stable_win64.exe",
   "visual studio code": "",
   "chrome": "",
   "spotify": "",

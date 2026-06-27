@@ -1,0 +1,23 @@
+import unittest
+from pathlib import Path
+
+from jarvis import DEFAULT_PERSONALITY, DEFAULT_SETTINGS
+
+
+class PrivacyDefaultTests(unittest.TestCase):
+    def test_new_profiles_have_no_bundled_user_identity(self) -> None:
+        self.assertEqual(DEFAULT_SETTINGS["user_name"], "")
+        self.assertFalse(DEFAULT_SETTINGS["profile_initialized"])
+        self.assertEqual(DEFAULT_PERSONALITY["user_name"], "")
+        self.assertEqual(DEFAULT_PERSONALITY["startup_greeting_name"], "")
+
+    def test_source_has_no_developer_windows_path(self) -> None:
+        project = Path(__file__).resolve().parent
+        checked = [project / "jarvis.py", project / "README.md", project / "config.example.env"]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in checked)
+        self.assertNotIn(r"C:\Users\jacks", combined)
+        self.assertNotIn("helping Jackson revise", combined)
+
+
+if __name__ == "__main__":
+    unittest.main()

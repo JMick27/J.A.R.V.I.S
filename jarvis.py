@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.3"
+APP_VERSION = "0.1.4"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -299,7 +299,8 @@ DEFAULT_DRAGGABLE_PANEL_LAYOUT = {
 }
 
 DEFAULT_SETTINGS = {
-    "user_name": "sir",
+    "user_name": "",
+    "profile_initialized": False,
     "preferred_voice_speed": 185,
     "preferred_music_app": "apple_music",
     "music_provider_order": ["apple_music", "spotify", "youtube_music", "youtube"],
@@ -497,13 +498,13 @@ DEFAULT_SETTINGS = {
 
 DEFAULT_PERSONALITY = {
     "assistant_name": "J.A.R.V.I.S.",
-    "user_name": "Jackson",
+    "user_name": "",
     "sarcasm_level": 3,
     "formality": "polished",
     "use_voice": True,
     "short_action_responses": True,
     "tone": "sarcastic, charming, calm, smart, futuristic, helpful",
-    "startup_greeting_name": "Jackson",
+    "startup_greeting_name": "",
 }
 
 INTEGRATION_CATALOG: dict[str, dict[str, Any]] = {
@@ -4508,7 +4509,7 @@ class JarvisAssistant:
         trimmed = document_text[:max_chars]
         truncated = len(document_text) > len(trimmed)
         prompt = (
-            "You are JARVIS helping Jackson revise a novel draft. Give honest, specific, constructive writing feedback. "
+            "You are JARVIS helping the user revise a novel draft. Give honest, specific, constructive writing feedback. "
             "Do not rewrite the whole piece. Focus on craft. Be encouraging but not fake. "
             "Use concise sections:\n"
             "1. What you did well\n"
@@ -4634,8 +4635,8 @@ class JarvisAssistant:
     def _build_context(self, user_text: str) -> str:
         window_title = get_active_window_title()
         context_lines = [
-            f"User name: {self.settings.get('user_name', 'sir')}",
-            f"Preferred user name/personality file: {self.personality.get('user_name', 'Jackson')}",
+            f"User name: {self.settings.get('user_name') or 'not provided'}",
+            f"Preferred user name/personality file: {self.personality.get('user_name') or 'not provided'}",
             f"Assistant name: {self.personality.get('assistant_name', 'J.A.R.V.I.S.')}",
             f"Assistant mode: {self.current_mode}",
             f"Sarcasm level 0-5: {self.personality.get('sarcasm_level', 3)}",
@@ -6457,7 +6458,7 @@ class JarvisApp(ctk.CTk):
             greeting = "Good afternoon"
         else:
             greeting = "Good evening"
-        user_name = str(self.assistant.personality.get("startup_greeting_name") or self.assistant.personality.get("user_name") or "Jackson")
+        user_name = str(self.assistant.personality.get("startup_greeting_name") or self.assistant.personality.get("user_name") or "there")
         lines = [
             "Initializing J.A.R.V.I.S.",
             f"Voice system {'online' if self.voice_backend != 'unavailable' else 'offline'}",
@@ -8155,7 +8156,7 @@ class JarvisApp(ctk.CTk):
             self.after(0, self._respond_to_webcam_wave)
 
     def _respond_to_webcam_wave(self) -> None:
-        user_name = str(self.assistant.personality.get("user_name") or "Jackson")
+        user_name = str(self.assistant.personality.get("user_name") or "there")
         message = f"Hello, {user_name}. Nice to see you."
         self.gesture_status_var.set("Wave recognized. Greeting delivered.")
         self._append_chat("JARVIS", message)
@@ -10588,7 +10589,7 @@ document.getElementById('player').appendChild(frame);}
         if self.assistant.settings.get("welcome_screen_enabled", True) and not self.assistant.settings.get("welcome_screen_seen", False):
             self._show_welcome_screen()
         else:
-            self.after(350, self._enable_layout_autosave)
+            self.after(150, self._ensure_user_profile)
 
     def _show_welcome_screen(self) -> None:
         self.assistant.settings["welcome_screen_seen"] = True
@@ -10716,7 +10717,30 @@ document.getElementById('player').appendChild(frame);}
             self.welcome_frame.destroy()
         self.welcome_frame = None
         self.welcome_canvas = None
-        self.after(350, self._enable_layout_autosave)
+        self.after(150, self._ensure_user_profile)
+
+    def _ensure_user_profile(self) -> None:
+        if self.assistant.settings.get("profile_initialized", False):
+            self._enable_layout_autosave()
+            return
+        dialog = ctk.CTkInputDialog(
+            text="What should JARVIS call you?",
+            title="JARVIS User Setup",
+        )
+        entered = dialog.get_input()
+        if entered is None:
+            self._append_chat("System", "User setup is incomplete. JARVIS will ask again next time.")
+            self._enable_layout_autosave()
+            return
+        user_name = re.sub(r"[^A-Za-z0-9 ._'-]", "", entered).strip()[:40] or "Sir"
+        self.assistant.settings["user_name"] = user_name
+        self.assistant.settings["profile_initialized"] = True
+        self.assistant.personality["user_name"] = user_name
+        self.assistant.personality["startup_greeting_name"] = user_name
+        save_settings(self.assistant.settings)
+        save_personality(self.assistant.personality)
+        self._append_chat("JARVIS", f"Identity profile configured. Welcome, {user_name}.")
+        self._enable_layout_autosave()
 
     def _draw_orb(self, radius: int) -> None:
         if self.orb is None:
