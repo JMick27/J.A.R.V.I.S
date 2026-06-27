@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from jarvis import DEFAULT_PERSONALITY, DEFAULT_SETTINGS
+from jarvis import SYSTEM_PROMPT
 
 
 class PrivacyDefaultTests(unittest.TestCase):
@@ -17,6 +18,11 @@ class PrivacyDefaultTests(unittest.TestCase):
         combined = "\n".join(path.read_text(encoding="utf-8") for path in checked)
         self.assertNotIn(r"C:\Users\jacks", combined)
         self.assertNotIn("helping Jackson revise", combined)
+
+    def test_system_prompt_requires_grounded_self_awareness(self) -> None:
+        normalized_prompt = " ".join(SYSTEM_PROMPT.lower().split())
+        self.assertIn("operational self-awareness", normalized_prompt)
+        self.assertIn("label it as fictional", normalized_prompt)
 
 
 if __name__ == "__main__":

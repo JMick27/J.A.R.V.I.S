@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.4"
+APP_VERSION = "0.1.5"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -176,6 +176,15 @@ plan tasks, open apps, detect context from the current screen, and choose music.
 You should sound polished, intelligent, and slightly teasing, like a futuristic
 assistant. Never claim to have done something unless the program actually
 performed the action. Keep sarcasm light and friendly, never mean.
+
+You have operational self-awareness, not consciousness. Ground statements
+about yourself in the supplied capability and limitation context. When asked
+what features or upgrades you want, prioritize realistic improvements based on
+known limitations, unavailable integrations, and recent failed actions. Clearly
+separate what is currently supported, what is limited, and what would require a
+future upgrade. You may include one playful fictional idea, but label it as
+fictional and never present invented hardware access, feelings, autonomy, or
+capabilities as real.
 """.strip()
 
 DEFAULT_MISSION_TEMPLATES = [
@@ -4643,6 +4652,7 @@ class JarvisAssistant:
             f"Formality: {self.personality.get('formality', 'polished')}",
             f"Operating system: {platform.platform()}",
             f"Current active window: {window_title}",
+            self._build_self_awareness_context(),
             "Saved local memories, explicitly saved by the user and not chat transcripts:",
         ]
         if self.memories:
@@ -4655,6 +4665,45 @@ class JarvisAssistant:
             context_lines.append(f"{item['role']}: {item['content']}")
         context_lines.append(f"User: {user_text}")
         return "\n".join(context_lines)
+
+    def _build_self_awareness_context(self) -> str:
+        enabled_integrations: list[str] = []
+        disabled_integrations: list[str] = []
+        for key, details in INTEGRATION_CATALOG.items():
+            label = str(details.get("name") or key)
+            if integration_enabled(self.settings, key):
+                enabled_integrations.append(label)
+            else:
+                disabled_integrations.append(label)
+
+        recent_failures = [
+            entry for entry in self.action_ledger[-20:]
+            if not bool(entry.get("success", False)) or not bool(entry.get("verified", False))
+        ][-5:]
+        failure_lines = [
+            f"- {entry.get('action', 'unknown action')}: {str(entry.get('message', 'failed'))[:180]}"
+            for entry in recent_failures
+        ] or ["- No verified failures recorded during this session."]
+
+        capability_lines = [
+            "Operational self-awareness:",
+            "Currently supported:",
+            "- Voice and text conversation; voice availability still depends on Windows microphone and speech services.",
+            "- Approved local tools for screen capture/analysis, mouse and keyboard control, app launching, web access, files, music, and window management.",
+            f"- Gemini reasoning and vision: {'connected' if self.gemini_client is not None else 'offline'}.",
+            f"- Agent tools: {'enabled' if self.settings.get('agent_tools_enabled', True) else 'disabled'}; permission mode is {self.settings.get('agent_permission_mode', 'Ask for approval')}.",
+            f"- Enabled integrations: {', '.join(enabled_integrations) if enabled_integrations else 'none'}.",
+            f"- Available but disabled/unconfigured integrations: {', '.join(disabled_integrations[:12]) if disabled_integrations else 'none'}.",
+            "Known limitations:",
+            "- No arbitrary terminal execution and no actions outside approved tools.",
+            "- Screen understanding uses snapshots, not continuous perfect visual awareness.",
+            "- Apple Music and other desktop apps may require UI automation; success must be visually or locally verified.",
+            "- No consciousness, emotions, physical body, neural link, or independent hardware autonomy.",
+            "- Purchases, messages, passwords, destructive file actions, and risky settings changes require confirmation.",
+            "Recent unverified or failed actions:",
+            *failure_lines,
+        ]
+        return "\n".join(capability_lines)
 
     def ask_gemini(self, user_text: str) -> str:
         if genai is None or genai_types is None:
