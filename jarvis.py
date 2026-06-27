@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.5"
+APP_VERSION = "0.1.6"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -448,8 +448,6 @@ DEFAULT_SETTINGS = {
     "startup_sequence_enabled": True,
     "startup_sequence_speak": False,
     "startup_greeting_speak": True,
-    "welcome_screen_enabled": True,
-    "welcome_screen_seen": False,
     "short_action_responses": True,
     "command_center_core_visible": True,
     "command_center_chat_visible": True,
@@ -5974,9 +5972,6 @@ class JarvisApp(ctk.CTk):
         self._tts_cooldown_until = 0.0
         self.boot_frame: ctk.CTkFrame | None = None
         self.boot_canvas: ctk.CTkCanvas | None = None
-        self.welcome_frame: ctk.CTkFrame | None = None
-        self.welcome_canvas: ctk.CTkCanvas | None = None
-        self.welcome_step = 0
         self.overlay_window: ctk.CTkToplevel | None = None
         self.overlay_entry: ctk.CTkEntry | None = None
         self.overlay_response_box: ctk.CTkTextbox | None = None
@@ -10635,137 +10630,6 @@ document.getElementById('player').appendChild(frame);}
             self.boot_frame.destroy()
         self.boot_frame = None
         self.boot_canvas = None
-        if self.assistant.settings.get("welcome_screen_enabled", True) and not self.assistant.settings.get("welcome_screen_seen", False):
-            self._show_welcome_screen()
-        else:
-            self.after(150, self._ensure_user_profile)
-
-    def _show_welcome_screen(self) -> None:
-        self.assistant.settings["welcome_screen_seen"] = True
-        save_settings(self.assistant.settings)
-        self.welcome_frame = ctk.CTkFrame(self, fg_color="#020611", corner_radius=0)
-        self.welcome_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.welcome_frame.lift()
-        self.welcome_frame.bind("<Button-1>", lambda _event: self._finish_welcome_screen())
-
-        self.welcome_canvas = ctk.CTkCanvas(self.welcome_frame, bg="#020611", highlightthickness=0)
-        self.welcome_canvas.pack(fill="both", expand=True)
-        self.welcome_canvas.bind("<Button-1>", lambda _event: self._finish_welcome_screen())
-        self.welcome_step = 0
-        self._animate_welcome_screen()
-
-    def _animate_welcome_screen(self) -> None:
-        if self.welcome_canvas is None or self.welcome_frame is None:
-            return
-
-        canvas = self.welcome_canvas
-        width = max(canvas.winfo_width(), 900)
-        height = max(canvas.winfo_height(), 600)
-        step = self.welcome_step
-        progress = min(1.0, step / 96)
-        reveal = min(1.0, step / 34)
-        center_x = width // 2
-        center_y = height // 2
-
-        canvas.delete("all")
-        canvas.create_rectangle(0, 0, width, height, fill="#020611", outline="")
-
-        for x in range(-80, width + 80, 80):
-            offset = (step * 2) % 80
-            canvas.create_line(x + offset, 0, x + offset - 80, height, fill="#071d31")
-        for y in range(0, height, 56):
-            color = "#0a2033" if y % 112 == 0 else "#061525"
-            canvas.create_line(0, y, width, y, fill=color)
-
-        scan_y = int((step * 7) % max(height, 1))
-        canvas.create_rectangle(0, scan_y - 22, width, scan_y + 22, fill="#031b2a", outline="")
-        canvas.create_line(0, scan_y, width, scan_y, fill="#1fdcff", width=2)
-
-        ring_base = min(width, height) // 4
-        for index, color in enumerate(["#0b5d82", "#14cfff", "#95efff"]):
-            radius = int((ring_base + index * 32) * (0.78 + 0.22 * reveal))
-            start = (step * (3 + index * 2) + index * 60) % 360
-            canvas.create_arc(
-                center_x - radius,
-                center_y - radius,
-                center_x + radius,
-                center_y + radius,
-                start=start,
-                extent=95 + index * 15,
-                outline=color,
-                width=2 + index,
-                style="arc",
-            )
-            canvas.create_arc(
-                center_x - radius + 20,
-                center_y - radius + 20,
-                center_x + radius - 20,
-                center_y + radius - 20,
-                start=start + 185,
-                extent=48 + index * 12,
-                outline="#134a63",
-                width=2,
-                style="arc",
-            )
-
-        pulse = 1 + ((step % 28) / 28)
-        glow_radius = int(72 + pulse * 18)
-        canvas.create_oval(center_x - glow_radius, center_y - glow_radius, center_x + glow_radius, center_y + glow_radius, outline="#125d7d", width=2)
-        canvas.create_oval(center_x - 42, center_y - 42, center_x + 42, center_y + 42, outline="#9befff", width=2)
-        canvas.create_oval(center_x - 13, center_y - 13, center_x + 13, center_y + 13, fill="#23d8ff", outline="#d9f7ff")
-        canvas.create_line(center_x - 250, center_y, center_x - 72, center_y, fill="#17d9ff", width=3)
-        canvas.create_line(center_x + 72, center_y, center_x + 250, center_y, fill="#17d9ff", width=3)
-
-        title_y = center_y - 170
-        body_y = center_y + 145
-        alpha_color = "#c8f6ff" if reveal > 0.75 else "#6edcff"
-        canvas.create_text(
-            center_x,
-            title_y,
-            text="Welcome to J.A.R.V.I.S.",
-            fill=alpha_color,
-            font=("Segoe UI", 38, "bold"),
-        )
-        canvas.create_text(
-            center_x,
-            body_y,
-            text="Whether you need educational assistance, updates,\nor just companionship, J.A.R.V.I.S is here to help!",
-            fill="#eefbff",
-            font=("Segoe UI", 18),
-            justify="center",
-            width=min(760, width - 120),
-        )
-        canvas.create_text(
-            center_x,
-            height - 64,
-            text="CLICK ANYWHERE TO CONTINUE",
-            fill="#32d3ff",
-            font=("Consolas", 11, "bold"),
-        )
-
-        left_x = max(42, center_x - ring_base - 210)
-        right_x = min(width - 42, center_x + ring_base + 210)
-        for index, label in enumerate(["EDUCATION", "UPDATES", "COMPANIONSHIP", "LOCAL OPS"]):
-            y = center_y - 58 + index * 30
-            canvas.create_text(left_x, y, text=label, anchor="w", fill="#32d3ff", font=("Consolas", 12, "bold"))
-            canvas.create_rectangle(left_x + 150, y - 6, left_x + 150 + int(92 * min(1, progress + index * 0.07)), y + 6, fill="#12698d", outline="#1fdcff")
-        for index in range(7):
-            height_bar = 18 + ((step + index * 6) % 54)
-            x = right_x - 190 + index * 26
-            canvas.create_rectangle(x, center_y + 95 - height_bar, x + 13, center_y + 95, fill="#0e86b5", outline="#1fdcff")
-
-        if progress >= 1.0:
-            self.after(850, self._finish_welcome_screen)
-            return
-
-        self.welcome_step += 1
-        self.after(45, self._animate_welcome_screen)
-
-    def _finish_welcome_screen(self) -> None:
-        if self.welcome_frame is not None:
-            self.welcome_frame.destroy()
-        self.welcome_frame = None
-        self.welcome_canvas = None
         self.after(150, self._ensure_user_profile)
 
     def _ensure_user_profile(self) -> None:

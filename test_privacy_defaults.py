@@ -24,6 +24,11 @@ class PrivacyDefaultTests(unittest.TestCase):
         self.assertIn("operational self-awareness", normalized_prompt)
         self.assertIn("label it as fictional", normalized_prompt)
 
+    def test_retired_welcome_screen_is_not_in_source(self) -> None:
+        source = (Path(__file__).resolve().parent / "jarvis.py").read_text(encoding="utf-8")
+        self.assertNotIn("welcome_screen_enabled", source)
+        self.assertNotIn("_show_welcome_screen", source)
+
 
 if __name__ == "__main__":
     unittest.main()

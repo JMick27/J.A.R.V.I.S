@@ -503,7 +503,7 @@ On launch, JARVIS runs a short startup sequence showing and optionally speaking 
 - Gemini connection status
 - Time-aware greeting using the name entered during first-run setup
 
-After the technical boot animation, JARVIS can show a separate animated welcome screen before revealing the main UI. It is a first-run experience: `welcome_screen_enabled` controls whether it is allowed, and `welcome_screen_seen` is set to `true` after it plays once.
+After the technical boot animation, first-time users are asked what JARVIS should call them before the main interface becomes active.
 
 Startup diagnostic messages are visual-only by default. `startup_greeting_speak` controls the short spoken greeting, while `startup_sequence_speak` is kept off so JARVIS does not read every subsystem line aloud.
 
