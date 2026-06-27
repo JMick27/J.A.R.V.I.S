@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import urllib.request
@@ -22,7 +23,12 @@ APP_FOLDER = "JARVIS Desktop Assistant"
 APP_EXE = "JARVIS Desktop Assistant.exe"
 ZIP_ASSET = "JARVIS-win-x64.zip"
 MANIFEST_ASSET = "release-manifest.json"
-INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / APP_FOLDER
+MANAGED_INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / APP_FOLDER
+LAUNCHER_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+NEARBY_INSTALL_DIR = LAUNCHER_DIR / APP_FOLDER
+# A launcher shipped beside an existing JARVIS updates that exact installation.
+# A standalone downloaded launcher uses the normal per-user Programs folder.
+INSTALL_DIR = NEARBY_INSTALL_DIR if (NEARBY_INSTALL_DIR / APP_EXE).exists() else MANAGED_INSTALL_DIR
 LOCAL_VERSION_FILE = INSTALL_DIR / "version.json"
 
 
