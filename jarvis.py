@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -311,6 +311,8 @@ DEFAULT_SETTINGS = {
     "ai_provider": "gemini",
     "auto_select_gemini_model": True,
     "gemini_model": "gemini-2.5-flash",
+    "gemini_fast_model": "gemini-2.5-flash-lite",
+    "prefer_fast_model_for_simple_chat": True,
     "gemini_fallback_models": [
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
@@ -3910,6 +3912,9 @@ class JarvisAssistant:
                 raise RuntimeError("No text-generation Gemini models were returned.")
 
             selected = models[0]
+            fast_models = [model for model in models if "flash-lite" in model.lower()]
+            if fast_models:
+                self.settings["gemini_fast_model"] = fast_models[0]
             old_model = self.settings.get("gemini_model")
             self.settings["gemini_model"] = selected
             fallback_models = [model for model in models[1:] if model != selected]
@@ -3988,6 +3993,31 @@ class JarvisAssistant:
         models.extend(str(model) for model in self.settings.get("gemini_fallback_models", []) if model)
         models.extend(["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"])
         return list(dict.fromkeys(self._clean_gemini_model_name(model) for model in models if model))
+
+    def _use_fast_chat_model(self, user_text: str) -> bool:
+        if not self.settings.get("prefer_fast_model_for_simple_chat", True):
+            return False
+        text = user_text.strip().lower()
+        if not text or len(text) > 240 or text.count("\n") > 1:
+            return False
+        complex_terms = (
+            "analyze", "in detail", "compare", "research", "write me", "rewrite",
+            "review", "critique", "code", "debug", "plan", "step by step",
+            "summarize", "explain why", "deep dive",
+        )
+        return not any(term in text for term in complex_terms)
+
+    def _gemini_chat_models_to_try(self, user_text: str) -> tuple[list[str], bool]:
+        models = self._gemini_models_to_try()
+        use_fast = self._use_fast_chat_model(user_text)
+        if not use_fast:
+            return models, False
+        fast_model = self._clean_gemini_model_name(str(self.settings.get("gemini_fast_model", "")))
+        if not fast_model:
+            fast_model = next((model for model in models if "flash-lite" in model.lower()), "")
+        if fast_model:
+            models = [fast_model, *[model for model in models if model != fast_model]]
+        return models, bool(fast_model)
 
     def _is_recoverable_gemini_error(self, exc: Exception) -> bool:
         message = str(exc).upper()
@@ -4631,7 +4661,7 @@ class JarvisAssistant:
         if self.gemini_client is None:
             return "Gemini is not configured. Check the JARVIS AI service connection and try again."
 
-        models_to_try = self._gemini_models_to_try()
+        models_to_try, intentional_fast_route = self._gemini_chat_models_to_try(user_text)
         last_error = None
         fallback_used = None
 
@@ -4646,7 +4676,7 @@ class JarvisAssistant:
                     )
                     text = getattr(response, "text", "").strip()
                     if text:
-                        if model != self.settings.get("gemini_model"):
+                        if model != self.settings.get("gemini_model") and not (intentional_fast_route and model == models_to_try[0]):
                             fallback_used = model
                             self.settings["gemini_model"] = model
                             save_settings(self.settings)
