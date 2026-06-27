@@ -4,7 +4,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from launcher import APP_EXE, APP_FOLDER, version_tuple
+from launcher import APP_EXE, APP_FOLDER, PREREQUISITES, version_tuple
 
 
 class LauncherTests(unittest.TestCase):
@@ -15,6 +15,10 @@ class LauncherTests(unittest.TestCase):
     def test_install_names_remain_stable(self) -> None:
         self.assertEqual(APP_FOLDER, "JARVIS Desktop Assistant")
         self.assertEqual(APP_EXE, "JARVIS Desktop Assistant.exe")
+
+    def test_prerequisites_use_fixed_microsoft_packages(self) -> None:
+        self.assertEqual(PREREQUISITES["edge"]["winget_id"], "Microsoft.Edge")
+        self.assertEqual(PREREQUISITES["vcredist"]["winget_id"], "Microsoft.VCRedist.2015+.x64")
 
     def test_release_hash_is_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:

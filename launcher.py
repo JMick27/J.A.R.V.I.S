@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,11 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+try:
+    import winreg
+except ImportError:
+    winreg = None
+
 
 REPOSITORY = "JMick27/J.A.R.V.I.S"
 RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
@@ -24,17 +30,67 @@ APP_EXE = "JARVIS Desktop Assistant.exe"
 ZIP_ASSET = "JARVIS-win-x64.zip"
 MANIFEST_ASSET = "release-manifest.json"
 MANAGED_INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / APP_FOLDER
+MANAGED_LAUNCHER_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "JARVIS Launcher"
 LAUNCHER_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 NEARBY_INSTALL_DIR = LAUNCHER_DIR / APP_FOLDER
 # A launcher shipped beside an existing JARVIS updates that exact installation.
 # A standalone downloaded launcher uses the normal per-user Programs folder.
 INSTALL_DIR = NEARBY_INSTALL_DIR if (NEARBY_INSTALL_DIR / APP_EXE).exists() else MANAGED_INSTALL_DIR
 LOCAL_VERSION_FILE = INSTALL_DIR / "version.json"
+PREREQUISITES = {
+    "edge": {
+        "label": "Microsoft Edge (embedded browser and video panels)",
+        "winget_id": "Microsoft.Edge",
+    },
+    "vcredist": {
+        "label": "Microsoft Visual C++ Runtime (native audio and vision components)",
+        "winget_id": "Microsoft.VCRedist.2015+.x64",
+    },
+}
 
 
 def version_tuple(value: str) -> tuple[int, ...]:
     cleaned = value.strip().lower().lstrip("v")
     return tuple(int(part) for part in cleaned.split(".") if part.isdigit()) or (0,)
+
+
+def edge_installed() -> bool:
+    roots = [
+        os.environ.get("PROGRAMFILES(X86)", ""),
+        os.environ.get("PROGRAMFILES", ""),
+        os.environ.get("LOCALAPPDATA", ""),
+    ]
+    return any(
+        root and (Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe").exists()
+        for root in roots
+    )
+
+
+def vcredist_installed() -> bool:
+    if winreg is None:
+        return False
+    paths = [
+        r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+        r"SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+    ]
+    for path in paths:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
+                installed, _kind = winreg.QueryValueEx(key, "Installed")
+                if int(installed) == 1:
+                    return True
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+    return False
+
+
+def missing_prerequisites() -> list[str]:
+    missing: list[str] = []
+    if not edge_installed():
+        missing.append("edge")
+    if not vcredist_installed():
+        missing.append("vcredist")
+    return missing
 
 
 class JarvisLauncher(tk.Tk):
@@ -45,6 +101,8 @@ class JarvisLauncher(tk.Tk):
         self.minsize(540, 360)
         self.configure(bg="#030712")
         self.remote_release: dict | None = None
+        self.prerequisites_to_install: list[str] = []
+        self.prerequisites_only = False
         self._build_ui()
         self.after(250, self.check_for_updates)
 
@@ -94,11 +152,19 @@ class JarvisLauncher(tk.Tk):
             remote = str(release.get("tag_name", "0.0.0")).lstrip("v")
             local = self.local_version()
             installed = (INSTALL_DIR / APP_EXE).exists()
+            missing = missing_prerequisites()
             if not installed or version_tuple(remote) > version_tuple(local):
                 label = "Installation ready" if not installed else "Update available"
-                self.ui(label, f"Version {remote} is ready. Installed version: {local}.", 18)
+                prerequisite_note = f" {len(missing)} Microsoft prerequisite(s) also need attention." if missing else ""
+                self.ui(label, f"Version {remote} is ready. Installed version: {local}.{prerequisite_note}", 18)
                 self.after(0, lambda: self.update_button.config(state="normal", text="INSTALL" if not installed else "INSTALL UPDATE"))
+                self.prerequisites_only = False
+            elif missing:
+                self.prerequisites_only = True
+                self.ui("Requirements needed", f"JARVIS is current, but {len(missing)} Microsoft prerequisite(s) are missing.", 18)
+                self.after(0, lambda: self.update_button.config(state="normal", text="INSTALL REQUIREMENTS"))
             else:
+                self.prerequisites_only = False
                 self.ui("JARVIS is up to date", f"Version {local} is ready to launch.", 100)
             if installed:
                 self.after(0, lambda: self.launch_button.config(state="normal"))
@@ -131,6 +197,20 @@ class JarvisLauncher(tk.Tk):
                 self.ui("Downloading JARVIS...", f"{received / 1_048_576:.1f} MB received", start + span * percent)
 
     def install_update(self) -> None:
+        if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
+            messagebox.showerror("JARVIS Launcher", "JARVIS currently requires 64-bit Windows 10 or Windows 11.")
+            return
+        self.prerequisites_to_install = missing_prerequisites()
+        if self.prerequisites_to_install:
+            labels = "\n".join(f"- {PREREQUISITES[key]['label']}" for key in self.prerequisites_to_install)
+            approved = messagebox.askyesno(
+                "JARVIS Prerequisites",
+                "JARVIS needs the following Microsoft components:\n\n"
+                f"{labels}\n\nInstall them automatically with Windows Package Manager?",
+            )
+            if not approved:
+                self.ui("Installation paused", "Install the listed Microsoft prerequisites, then try again.", 0)
+                return
         self.update_button.config(state="disabled")
         self.launch_button.config(state="disabled")
         threading.Thread(target=self._install_worker, daemon=True).start()
@@ -138,6 +218,13 @@ class JarvisLauncher(tk.Tk):
     def _install_worker(self) -> None:
         backup = INSTALL_DIR.with_name(f"{APP_FOLDER}.backup")
         try:
+            self._install_prerequisites(self.prerequisites_to_install)
+            if self.prerequisites_only:
+                self._create_shortcuts()
+                self.ui("Requirements installed", "JARVIS is ready to launch.", 100)
+                self.after(0, lambda: self.launch_button.config(state="normal"))
+                self.after(0, lambda: self.update_button.config(state="disabled"))
+                return
             with tempfile.TemporaryDirectory(prefix="jarvis-update-") as temp_name:
                 temp = Path(temp_name)
                 archive = temp / ZIP_ASSET
@@ -177,6 +264,8 @@ class JarvisLauncher(tk.Tk):
                 if backup.exists():
                     shutil.rmtree(backup, ignore_errors=True)
 
+            self._create_shortcuts()
+
             self.ui("Update complete", "JARVIS is installed and ready.", 100)
             self.after(0, lambda: self.launch_button.config(state="normal"))
             self.after(0, lambda: self.update_button.config(state="disabled"))
@@ -186,6 +275,57 @@ class JarvisLauncher(tk.Tk):
             if (INSTALL_DIR / APP_EXE).exists():
                 self.after(0, lambda: self.launch_button.config(state="normal"))
             self.after(0, lambda: messagebox.showerror("JARVIS Update", f"The update could not be installed.\n\n{exc}"))
+
+    def _install_prerequisites(self, prerequisite_keys: list[str]) -> None:
+        if not prerequisite_keys:
+            return
+        winget = shutil.which("winget.exe") or shutil.which("winget")
+        if not winget:
+            raise RuntimeError("Windows Package Manager is unavailable. Install 'App Installer' from the Microsoft Store, then try again.")
+        for index, key in enumerate(prerequisite_keys, start=1):
+            definition = PREREQUISITES[key]
+            self.ui(
+                "Installing prerequisites...",
+                f"{index}/{len(prerequisite_keys)}: {definition['label']}",
+                2 + (index - 1) * 3,
+            )
+            command = [
+                str(winget), "install", "--id", str(definition["winget_id"]), "--exact",
+                "--silent", "--accept-package-agreements", "--accept-source-agreements",
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=600, shell=False)
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "Unknown installer error").strip()[-600:]
+                raise RuntimeError(f"Could not install {definition['label']}: {detail}")
+
+    def _create_shortcuts(self) -> None:
+        launcher_path = Path(sys.executable).resolve()
+        if not getattr(sys, "frozen", False) or not launcher_path.exists():
+            return
+        try:
+            import win32com.client
+        except ImportError:
+            return
+        shortcut_target = launcher_path
+        if INSTALL_DIR == MANAGED_INSTALL_DIR:
+            MANAGED_LAUNCHER_DIR.mkdir(parents=True, exist_ok=True)
+            installed_launcher = MANAGED_LAUNCHER_DIR / "JARVIS Launcher.exe"
+            if launcher_path != installed_launcher:
+                shutil.copy2(launcher_path, installed_launcher)
+            shortcut_target = installed_launcher
+        shortcut_locations = [
+            Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop" / "JARVIS Launcher.lnk",
+            Path(os.environ.get("APPDATA", str(Path.home()))) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "JARVIS Launcher.lnk",
+        ]
+        shell = win32com.client.Dispatch("WScript.Shell")
+        for shortcut_path in shortcut_locations:
+            shortcut_path.parent.mkdir(parents=True, exist_ok=True)
+            shortcut = shell.CreateShortcut(str(shortcut_path))
+            shortcut.TargetPath = str(shortcut_target)
+            shortcut.WorkingDirectory = str(shortcut_target.parent)
+            shortcut.IconLocation = f"{shortcut_target},0"
+            shortcut.Description = "Launch and update JARVIS"
+            shortcut.Save()
 
     def launch(self) -> None:
         executable = INSTALL_DIR / APP_EXE
