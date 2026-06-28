@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.6"
+APP_VERSION = "0.1.7"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -5954,6 +5954,7 @@ class JarvisApp(ctk.CTk):
         self.recognizer = sr.Recognizer()
         self.microphone: sr.Microphone | None = None
         self.voice_backend = "unavailable"
+        self._voice_audio_fallback: sr.AudioData | None = None
         self.tts_queue: queue.Queue[str] = queue.Queue()
         self.is_listening = False
         self._tts_stop = threading.Event()
@@ -10692,20 +10693,25 @@ document.getElementById('player').appendChild(frame);}
         self.after(500, lambda: self._draw_orb(next_radius))
 
     def _setup_microphone(self) -> None:
+        self.microphone = None
+        if sd is not None and np is not None:
+            try:
+                configured_index = self.assistant.settings.get("voice_input_device_index")
+                device_index = configured_index if isinstance(configured_index, int) else None
+                sd.check_input_settings(device=device_index, channels=1, dtype="int16")
+                self.voice_backend = "sounddevice"
+                self.mic_var.set("Ready")
+                return
+            except Exception as exc:
+                self._append_chat("System", f"Default sounddevice microphone check failed: {exc}")
         try:
             self.microphone = sr.Microphone()
             self.voice_backend = "pyaudio"
             self.mic_var.set("Ready")
         except Exception as exc:
-            self.microphone = None
-            if sd is not None:
-                self.voice_backend = "sounddevice"
-                self.mic_var.set("Ready")
-                self._append_chat("System", "PyAudio unavailable, using sounddevice for voice input.")
-            else:
-                self.voice_backend = "unavailable"
-                self.mic_var.set("Unavailable")
-                self._append_chat("System", f"Microphone unavailable: {exc}")
+            self.voice_backend = "unavailable"
+            self.mic_var.set("Unavailable")
+            self._append_chat("System", f"Microphone unavailable: {exc}")
 
     def _setup_hotkey(self) -> None:
         if keyboard is None:
@@ -11608,6 +11614,7 @@ document.getElementById('player').appendChild(frame);}
             time.sleep(0.3)
         self._set_status("Listening...")
         self._set_mic_status("Listening")
+        self._voice_audio_fallback = None
         try:
             if self.voice_backend == "pyaudio" and self.microphone is not None:
                 with self.microphone as source:
@@ -11650,32 +11657,41 @@ document.getElementById('player').appendChild(frame);}
     def _transcribe_voice(self, audio: sr.AudioData) -> str:
         provider = str(self.assistant.settings.get("voice_transcription_provider", "auto")).lower()
         google_error: Exception | None = None
+        candidates = [audio]
+        if self._voice_audio_fallback is not None and self._voice_audio_fallback is not audio:
+            candidates.append(self._voice_audio_fallback)
 
         if provider in {"auto", "google"}:
-            try:
-                self._set_command_status("Transcribing with Google...")
-                return self.recognizer.recognize_google(audio)
-            except sr.UnknownValueError as exc:
-                google_error = exc
-                if provider == "google":
-                    raise
-                self._append_chat("System", "Google could not understand it; trying Gemini transcription.")
-            except Exception as exc:
-                google_error = exc
-                if provider == "google":
-                    raise
-                self._append_chat("System", f"Google transcription failed; trying Gemini. ({exc})")
+            for index, candidate in enumerate(candidates):
+                try:
+                    label = "enhanced audio" if index else "audio"
+                    self._set_command_status(f"Transcribing {label} with Google...")
+                    return self.recognizer.recognize_google(candidate)
+                except sr.UnknownValueError as exc:
+                    google_error = exc
+                    continue
+                except Exception as exc:
+                    google_error = exc
+                    break
+            if provider == "google" and google_error is not None:
+                raise google_error
+            self._append_chat("System", "Google could not transcribe it; trying Gemini transcription.")
 
         if provider in {"auto", "gemini"}:
-            try:
-                self._set_command_status("Transcribing with Gemini...")
-                text = self.assistant.transcribe_audio_with_gemini(audio)
-                if text:
-                    return text
-            except Exception as exc:
-                if provider == "gemini":
-                    raise
-                self._append_chat("System", f"Gemini transcription also failed: {exc}")
+            gemini_error: Exception | None = None
+            for index, candidate in enumerate(candidates):
+                try:
+                    label = "enhanced audio" if index else "audio"
+                    self._set_command_status(f"Transcribing {label} with Gemini...")
+                    text = self.assistant.transcribe_audio_with_gemini(candidate)
+                    if text:
+                        return text
+                except Exception as exc:
+                    gemini_error = exc
+            if provider == "gemini" and gemini_error is not None:
+                raise gemini_error
+            if gemini_error is not None:
+                self._append_chat("System", f"Gemini transcription also failed: {gemini_error}")
 
         if isinstance(google_error, sr.UnknownValueError):
             raise google_error
@@ -11771,13 +11787,14 @@ document.getElementById('player').appendChild(frame);}
             audio_array = boosted
             self._append_chat("System", f"Boosted quiet microphone audio by {gain:.1f}x before transcription.")
 
-        audio_array, cleanup = clean_voice_audio(audio_array, sample_rate)
+        primary_audio = audio_array.copy()
+        cleaned_audio, cleanup = clean_voice_audio(audio_array, sample_rate)
         self._append_chat(
             "System",
             f"Cleaned audio peak: {cleanup['clean_peak']}/32767, RMS: {cleanup['clean_rms']}.",
         )
-
-        return sr.AudioData(audio_array.tobytes(), sample_rate, 2)
+        self._voice_audio_fallback = sr.AudioData(cleaned_audio.tobytes(), sample_rate, 2)
+        return sr.AudioData(primary_audio.tobytes(), sample_rate, 2)
 
     def _process_command(self, text: str, source: str = "main") -> None:
         self._set_status("Acting...")
