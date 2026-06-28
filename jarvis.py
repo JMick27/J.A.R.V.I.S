@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.8"
+APP_VERSION = "0.1.9"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -8218,6 +8218,16 @@ class JarvisApp(ctk.CTk):
         self._gesture_last_cursor = clamp_screen_point(smooth_x, smooth_y)
         ctypes.windll.user32.SetCursorPos(*self._gesture_last_cursor)
 
+    @staticmethod
+    def _project_index_pointer(points: Any) -> tuple[float, float]:
+        """Project the index-finger ray beyond the fingertip like a VR pointer."""
+        pip = points[6]
+        tip = points[8]
+        ray_gain = 2.15
+        projected_x = float(tip.x) + (float(tip.x) - float(pip.x)) * ray_gain
+        projected_y = float(tip.y) + (float(tip.y) - float(pip.y)) * ray_gain
+        return projected_x, projected_y
+
     def _process_mediapipe_hand(self, points: Any, frame_width: int, frame_height: int) -> str:
         del frame_width, frame_height
         palm_scale = max(0.001, self._hand_distance(points, 0, 9))
@@ -8267,7 +8277,8 @@ class JarvisApp(ctk.CTk):
         if pointing and not self._gesture_pinched and mode != "Disabled":
             self._gesture_point_frames += 1
             if self._gesture_point_frames >= 3:
-                self._move_cursor_from_point(float(points[8].x), float(points[8].y))
+                pointer_x, pointer_y = self._project_index_pointer(points)
+                self._move_cursor_from_point(pointer_x, pointer_y)
         else:
             self._gesture_point_frames = 0
             if not pinch_candidate:

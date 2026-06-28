@@ -191,7 +191,7 @@ focus mode; open chrome; play music, you pick; start a focus timer for 25 minute
 The **Hands** panel uses the bundled MediaPipe Hand Landmarker model to track 21 three-dimensional hand landmarks locally.
 
 - Wave repeatedly with a clearly open palm: JARVIS says hello after strict motion validation.
-- Hold a stable index-point: move the cursor with landmark smoothing and a jitter dead zone.
+- Hold a stable index-point: a projected finger ray moves the cursor by pointing direction, with landmark smoothing and a jitter dead zone.
 - Pinch your thumb and index finger deliberately: click only when gesture control is **Armed**.
 - **Safe** mode permits greetings and cursor movement but blocks clicks.
 - **Disabled** mode ignores control gestures.
