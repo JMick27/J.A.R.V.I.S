@@ -188,15 +188,15 @@ focus mode; open chrome; play music, you pick; start a focus timer for 25 minute
 
 ## Webcam Hand Gestures And Layouts
 
-The **Hands** panel uses MediaPipe hand landmarks when they are available. On Python 3.14, where MediaPipe currently has no compatible wheel, JARVIS automatically uses its local OpenCV motion and hand-contour fallback.
+The **Hands** panel uses the bundled MediaPipe Hand Landmarker model to track 21 three-dimensional hand landmarks locally.
 
-- Wave with an open hand: JARVIS says hello.
-- Point with your index finger: move the mouse cursor when MediaPipe is available.
-- Pinch your thumb and index finger: click only when gesture control is **Armed**.
+- Wave repeatedly with a clearly open palm: JARVIS says hello after strict motion validation.
+- Hold a stable index-point: move the cursor with landmark smoothing and a jitter dead zone.
+- Pinch your thumb and index finger deliberately: click only when gesture control is **Armed**.
 - **Safe** mode permits greetings and cursor movement but blocks clicks.
 - **Disabled** mode ignores control gestures.
 
-The OpenCV fallback supports wave recognition and approximate cursor movement. Pinch clicking requires the more precise MediaPipe backend. Webcam frames remain local and are not sent to Gemini.
+Generic OpenCV motion never controls or clicks the cursor. If landmark tracking is unavailable, the fallback is diagnostic-only. Webcam frames remain local and are not sent to Gemini.
 
 Voice or text commands also work:
 

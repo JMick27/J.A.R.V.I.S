@@ -8,15 +8,7 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHON=python"
 )
 
-%PYTHON% -m PyInstaller ^
-  --noconfirm ^
-  --clean ^
-  --windowed ^
-  --name "JARVIS Desktop Assistant" ^
-  --icon "jarvis_icon.ico" ^
-  --add-data "jarvis_icon.ico;." ^
-  --add-data "distribution_config.json;." ^
-  jarvis.py
+%PYTHON% -m PyInstaller --noconfirm --clean "JARVIS Desktop Assistant.spec"
 
 echo.
 echo If the build succeeded, your app is in:

@@ -1,12 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_all
+
+mediapipe_datas, mediapipe_binaries, mediapipe_hiddenimports = collect_all('mediapipe')
+
 
 a = Analysis(
     ['jarvis.py'],
     pathex=[],
-    binaries=[],
-    datas=[('jarvis_icon.ico', '.'), ('distribution_config.json', '.')],
-    hiddenimports=[],
+    binaries=mediapipe_binaries,
+    datas=[('jarvis_icon.ico', '.'), ('distribution_config.json', '.'), ('hand_landmarker.task', '.'), *mediapipe_datas],
+    hiddenimports=mediapipe_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

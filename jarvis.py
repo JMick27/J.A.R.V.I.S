@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.7"
+APP_VERSION = "0.1.8"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -150,6 +150,7 @@ DEFAULT_VIDEO_NEWS_FEEDS = {
 }
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
+HAND_LANDMARKER_MODEL_PATH = RESOURCE_DIR / "hand_landmarker.task"
 DATA_DIR = Path(os.environ.get("APPDATA", str(BASE_DIR))) / APP_NAME if getattr(sys, "frozen", False) else BASE_DIR
 SETTINGS_PATH = DATA_DIR / "settings.json"
 MEMORY_PATH = DATA_DIR / "jarvis_memory.json"
@@ -6037,9 +6038,14 @@ class JarvisApp(ctk.CTk):
         self._gesture_capture: Any | None = None
         self._gesture_preview_image: Any | None = None
         self._gesture_wave_positions: list[tuple[float, float]] = []
+        self._gesture_open_palm_frames = 0
         self._gesture_last_wave_at = 0.0
         self._gesture_last_click_at = 0.0
         self._gesture_pinched = False
+        self._gesture_pinch_frames = 0
+        self._gesture_pinch_release_frames = 0
+        self._gesture_point_frames = 0
+        self._gesture_cursor_samples: list[tuple[float, float]] = []
         self._gesture_last_cursor: tuple[int, int] | None = None
         self.workspace_frame: ctk.CTkFrame | None = None
         self.core_panel: ctk.CTkFrame | None = None
@@ -7941,7 +7947,7 @@ class JarvisApp(ctk.CTk):
         ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         ctk.CTkLabel(
             window,
-            text="Wave to greet JARVIS. Point to guide the cursor; Armed mode also enables pinch-to-click.",
+            text="Hold an index-point to guide the cursor. Pinch thumb and index to click in Armed mode. A greeting wave requires a clear open palm moving side to side.",
             text_color="#d9f7ff",
             anchor="w",
             wraplength=670,
@@ -7979,7 +7985,7 @@ class JarvisApp(ctk.CTk):
         ctk.CTkButton(controls, text="Stop", width=72, fg_color="#7b2633", hover_color="#a13343", command=self.stop_webcam_gestures).pack(side="left", padx=4)
         ctk.CTkLabel(
             footer,
-            text="Safe: wave + cursor only    Armed: pinch clicks    Open palm: wave hello",
+            text="Safe: point + wave    Armed: point + pinch click    Motion blobs never control the cursor",
             text_color="#9db7c7",
             anchor="e",
         ).grid(row=1, column=1, sticky="e", padx=14, pady=(0, 8))
@@ -8009,6 +8015,11 @@ class JarvisApp(ctk.CTk):
             return
         self._gesture_stop.clear()
         self._gesture_wave_positions.clear()
+        self._gesture_open_palm_frames = 0
+        self._gesture_point_frames = 0
+        self._gesture_pinch_frames = 0
+        self._gesture_pinch_release_frames = 0
+        self._gesture_cursor_samples.clear()
         self._gesture_thread = threading.Thread(target=self._webcam_gesture_worker, daemon=True)
         self._gesture_thread.start()
         self.assistant.settings["webcam_gestures_enabled"] = True
@@ -8044,21 +8055,32 @@ class JarvisApp(ctk.CTk):
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         capture.set(cv2.CAP_PROP_FPS, 24)
-        use_mediapipe = mp is not None and hasattr(mp, "solutions")
-        hands = None
+        legacy_hands = None
+        task_hand_landmarker = None
         background = None
-        if use_mediapipe:
-            hands = mp.solutions.hands.Hands(
+        if mp is not None and hasattr(mp, "tasks") and HAND_LANDMARKER_MODEL_PATH.exists():
+            options = mp.tasks.vision.HandLandmarkerOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_path=str(HAND_LANDMARKER_MODEL_PATH)),
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                num_hands=1,
+                min_hand_detection_confidence=0.65,
+                min_hand_presence_confidence=0.65,
+                min_tracking_confidence=0.65,
+            )
+            task_hand_landmarker = mp.tasks.vision.HandLandmarker.create_from_options(options)
+            backend = "MediaPipe Tasks hand landmarks"
+        elif mp is not None and hasattr(mp, "solutions"):
+            legacy_hands = mp.solutions.hands.Hands(
                 static_image_mode=False,
                 max_num_hands=1,
-                model_complexity=0,
-                min_detection_confidence=0.55,
-                min_tracking_confidence=0.5,
+                model_complexity=1,
+                min_detection_confidence=0.65,
+                min_tracking_confidence=0.65,
             )
-            backend = "MediaPipe hand landmarks"
+            backend = "MediaPipe legacy hand landmarks"
         else:
             background = cv2.createBackgroundSubtractorMOG2(history=160, varThreshold=24, detectShadows=False)
-            backend = "OpenCV motion + hand-contour fallback"
+            backend = "OpenCV diagnostic fallback (gestures disabled)"
         self.after(0, lambda name=backend: self._webcam_gesture_started(name))
         last_preview = 0.0
         try:
@@ -8070,16 +8092,25 @@ class JarvisApp(ctk.CTk):
                 if self.assistant.settings.get("webcam_mirror_preview", True):
                     frame = cv2.flip(frame, 1)
                 gesture_label = "Watching"
-                if hands is not None:
+                if task_hand_landmarker is not None:
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    results = hands.process(rgb)
+                    media_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                    result = task_hand_landmarker.detect_for_video(media_image, int(time.monotonic() * 1000))
+                    if result.hand_landmarks:
+                        points = result.hand_landmarks[0]
+                        self._draw_task_hand_landmarks(frame, points)
+                        gesture_label = self._process_mediapipe_hand(points, frame.shape[1], frame.shape[0])
+                    else:
+                        self._reset_hand_pose_tracking()
+                elif legacy_hands is not None:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = legacy_hands.process(rgb)
                     if results.multi_hand_landmarks:
                         landmarks = results.multi_hand_landmarks[0]
                         mp.solutions.drawing_utils.draw_landmarks(frame, landmarks, mp.solutions.hands.HAND_CONNECTIONS)
                         gesture_label = self._process_mediapipe_hand(landmarks.landmark, frame.shape[1], frame.shape[0])
                     else:
-                        self._gesture_wave_positions.clear()
-                        self._gesture_pinched = False
+                        self._reset_hand_pose_tracking()
                 else:
                     gesture_label = self._process_opencv_wave(frame, background)
                 cv2.putText(frame, gesture_label, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 220, 80), 2, cv2.LINE_AA)
@@ -8093,51 +8124,160 @@ class JarvisApp(ctk.CTk):
         except Exception as exc:
             self.after(0, lambda error=str(exc): self._webcam_gesture_failed(error))
         finally:
-            if hands is not None:
-                hands.close()
+            if task_hand_landmarker is not None:
+                task_hand_landmarker.close()
+            if legacy_hands is not None:
+                legacy_hands.close()
             capture.release()
             self._gesture_capture = None
             self.after(0, self._webcam_gesture_stopped)
 
+    @staticmethod
+    def _hand_distance(points: Any, first: int, second: int) -> float:
+        return math.sqrt(
+            (float(points[first].x) - float(points[second].x)) ** 2
+            + (float(points[first].y) - float(points[second].y)) ** 2
+            + (float(getattr(points[first], "z", 0.0)) - float(getattr(points[second], "z", 0.0))) ** 2
+        )
+
+    @classmethod
+    def _hand_joint_angle(cls, points: Any, first: int, joint: int, last: int) -> float:
+        a = (
+            float(points[first].x) - float(points[joint].x),
+            float(points[first].y) - float(points[joint].y),
+            float(getattr(points[first], "z", 0.0)) - float(getattr(points[joint], "z", 0.0)),
+        )
+        b = (
+            float(points[last].x) - float(points[joint].x),
+            float(points[last].y) - float(points[joint].y),
+            float(getattr(points[last], "z", 0.0)) - float(getattr(points[joint], "z", 0.0)),
+        )
+        denominator = math.sqrt(sum(value * value for value in a)) * math.sqrt(sum(value * value for value in b))
+        if denominator <= 1e-8:
+            return 0.0
+        cosine = max(-1.0, min(1.0, sum(a[index] * b[index] for index in range(3)) / denominator))
+        return math.degrees(math.acos(cosine))
+
+    @classmethod
+    def _finger_is_extended(cls, points: Any, mcp: int, pip: int, dip: int, tip: int) -> bool:
+        pip_angle = cls._hand_joint_angle(points, mcp, pip, dip)
+        dip_angle = cls._hand_joint_angle(points, pip, dip, tip)
+        return (
+            pip_angle >= 150.0
+            and dip_angle >= 145.0
+            and cls._hand_distance(points, 0, tip) > cls._hand_distance(points, 0, pip) * 1.12
+        )
+
+    def _reset_hand_pose_tracking(self) -> None:
+        self._gesture_wave_positions.clear()
+        self._gesture_open_palm_frames = 0
+        self._gesture_point_frames = 0
+        self._gesture_pinch_frames = 0
+        self._gesture_pinch_release_frames = 0
+        self._gesture_pinched = False
+        self._gesture_cursor_samples.clear()
+
+    def _draw_task_hand_landmarks(self, frame: Any, points: Any) -> None:
+        connections = (
+            (0, 1), (1, 2), (2, 3), (3, 4),
+            (0, 5), (5, 6), (6, 7), (7, 8),
+            (5, 9), (9, 10), (10, 11), (11, 12),
+            (9, 13), (13, 14), (14, 15), (15, 16),
+            (13, 17), (0, 17), (17, 18), (18, 19), (19, 20),
+        )
+        width = frame.shape[1]
+        height = frame.shape[0]
+        pixels = [(int(point.x * width), int(point.y * height)) for point in points]
+        for first, second in connections:
+            cv2.line(frame, pixels[first], pixels[second], (60, 200, 255), 2, cv2.LINE_AA)
+        for index, pixel in enumerate(pixels):
+            color = (80, 255, 160) if index in {4, 8, 12, 16, 20} else (255, 220, 80)
+            cv2.circle(frame, pixel, 4, color, -1, cv2.LINE_AA)
+
+    def _move_cursor_from_point(self, point_x: float, point_y: float) -> None:
+        samples = self._gesture_cursor_samples
+        samples.append((point_x, point_y))
+        del samples[:-5]
+        stable_x = float(np.median([sample[0] for sample in samples]))
+        stable_y = float(np.median([sample[1] for sample in samples]))
+        screen_width, screen_height = screen_size()
+        margin_x = 0.14
+        margin_y = 0.12
+        target_x = int((max(margin_x, min(1.0 - margin_x, stable_x)) - margin_x) / (1.0 - margin_x * 2) * screen_width)
+        target_y = int((max(margin_y, min(1.0 - margin_y, stable_y)) - margin_y) / (1.0 - margin_y * 2) * screen_height)
+        if self._gesture_last_cursor is None:
+            smooth_x, smooth_y = target_x, target_y
+        else:
+            old_x, old_y = self._gesture_last_cursor
+            distance = math.hypot(target_x - old_x, target_y - old_y)
+            if distance < 5:
+                return
+            blend = 0.22 if distance < 100 else 0.34
+            smooth_x = int(old_x * (1.0 - blend) + target_x * blend)
+            smooth_y = int(old_y * (1.0 - blend) + target_y * blend)
+        self._gesture_last_cursor = clamp_screen_point(smooth_x, smooth_y)
+        ctypes.windll.user32.SetCursorPos(*self._gesture_last_cursor)
+
     def _process_mediapipe_hand(self, points: Any, frame_width: int, frame_height: int) -> str:
-        fingers_up = [
-            points[8].y < points[6].y,
-            points[12].y < points[10].y,
-            points[16].y < points[14].y,
-            points[20].y < points[18].y,
+        del frame_width, frame_height
+        palm_scale = max(0.001, self._hand_distance(points, 0, 9))
+        extended = [
+            self._finger_is_extended(points, 5, 6, 7, 8),
+            self._finger_is_extended(points, 9, 10, 11, 12),
+            self._finger_is_extended(points, 13, 14, 15, 16),
+            self._finger_is_extended(points, 17, 18, 19, 20),
         ]
-        open_palm = all(fingers_up)
-        if open_palm:
-            self._track_webcam_wave(float(points[9].x))
-            return "Open palm / wave"
-
-        pointing = fingers_up[0] and not any(fingers_up[1:])
+        thumb_open = self._hand_distance(points, 4, 5) / palm_scale > 0.52
+        open_palm = all(extended) and thumb_open
+        pointing = extended[0] and not any(extended[1:])
+        control_pose = not any(extended[1:])
         mode = str(self.assistant.settings.get("webcam_gesture_mode", "Safe"))
-        if pointing and mode != "Disabled":
-            screen_width, screen_height = screen_size()
-            margin = 0.12
-            usable = 1.0 - margin * 2
-            target_x = int((max(margin, min(1.0 - margin, points[8].x)) - margin) / usable * screen_width)
-            target_y = int((max(margin, min(1.0 - margin, points[8].y)) - margin) / usable * screen_height)
-            if self._gesture_last_cursor is None:
-                smooth_x, smooth_y = target_x, target_y
-            else:
-                old_x, old_y = self._gesture_last_cursor
-                smooth_x = int(old_x * 0.68 + target_x * 0.32)
-                smooth_y = int(old_y * 0.68 + target_y * 0.32)
-            self._gesture_last_cursor = clamp_screen_point(smooth_x, smooth_y)
-            ctypes.windll.user32.SetCursorPos(*self._gesture_last_cursor)
 
-        pinch_distance = ((points[4].x - points[8].x) ** 2 + (points[4].y - points[8].y) ** 2) ** 0.5
-        pinched = pinch_distance < 0.045
-        if pinched and not self._gesture_pinched and mode == "Armed" and time.monotonic() - self._gesture_last_click_at > 0.75:
-            click_mouse()
-            self._gesture_last_click_at = time.monotonic()
-            self.after(0, lambda: self._set_command_status("Gesture: pinch click"))
-        self._gesture_pinched = pinched
-        if pinched:
-            return "Pinch click" if mode == "Armed" else "Pinch blocked (Safe mode)"
-        return "Pointing" if pointing else "Hand detected"
+        if open_palm:
+            self._gesture_open_palm_frames += 1
+            self._gesture_point_frames = 0
+            self._gesture_cursor_samples.clear()
+            if self._gesture_open_palm_frames >= 5:
+                self._track_webcam_wave(float(points[9].x))
+            return "Open palm - wave side to side"
+        self._gesture_open_palm_frames = 0
+        self._gesture_wave_positions.clear()
+
+        pinch_ratio = self._hand_distance(points, 4, 8) / palm_scale
+        pinch_candidate = control_pose and pinch_ratio <= 0.30
+        pinch_released = pinch_ratio >= 0.43
+        if pinch_candidate:
+            self._gesture_pinch_frames += 1
+            self._gesture_pinch_release_frames = 0
+        elif pinch_released:
+            self._gesture_pinch_release_frames += 1
+            self._gesture_pinch_frames = 0
+            if self._gesture_pinch_release_frames >= 3:
+                self._gesture_pinched = False
+        else:
+            self._gesture_pinch_frames = max(0, self._gesture_pinch_frames - 1)
+
+        if self._gesture_pinch_frames >= 3 and not self._gesture_pinched:
+            self._gesture_pinched = True
+            if mode == "Armed" and time.monotonic() - self._gesture_last_click_at > 0.8:
+                click_mouse()
+                self._gesture_last_click_at = time.monotonic()
+                self.after(0, lambda: self._set_command_status("Gesture: deliberate pinch click"))
+
+        if pointing and not self._gesture_pinched and mode != "Disabled":
+            self._gesture_point_frames += 1
+            if self._gesture_point_frames >= 3:
+                self._move_cursor_from_point(float(points[8].x), float(points[8].y))
+        else:
+            self._gesture_point_frames = 0
+            if not pinch_candidate:
+                self._gesture_cursor_samples.clear()
+
+        if self._gesture_pinched or pinch_candidate:
+            return "Pinch click" if mode == "Armed" else "Pinch held - click disabled in Safe mode"
+        if pointing:
+            return "Pointing - cursor active" if self._gesture_point_frames >= 3 else "Hold point steady"
+        return "Hand detected - make a clear point"
 
     def _process_opencv_wave(self, frame: Any, background: Any) -> str:
         if background is None:
@@ -8159,43 +8299,32 @@ class JarvisApp(ctk.CTk):
             return "Watching for a wave"
         x, y, width, height = cv2.boundingRect(contour)
         cv2.rectangle(frame, (x, y), (x + width, y + height), (60, 230, 255), 2)
-        center_x = (x + width / 2) / frame.shape[1]
-        center_y = (y + height / 2) / frame.shape[0]
-        self._track_webcam_wave(center_x)
-        mode = str(self.assistant.settings.get("webcam_gesture_mode", "Safe"))
-        if mode != "Disabled":
-            screen_width, screen_height = screen_size()
-            target_x = int(max(0.0, min(1.0, center_x)) * screen_width)
-            target_y = int(max(0.0, min(1.0, center_y)) * screen_height)
-            if self._gesture_last_cursor is None:
-                smooth_x, smooth_y = target_x, target_y
-            else:
-                old_x, old_y = self._gesture_last_cursor
-                smooth_x = int(old_x * 0.78 + target_x * 0.22)
-                smooth_y = int(old_y * 0.78 + target_y * 0.22)
-            self._gesture_last_cursor = clamp_screen_point(smooth_x, smooth_y)
-            ctypes.windll.user32.SetCursorPos(*self._gesture_last_cursor)
-        return "Moving hand detected"
+        return "Motion detected - landmark gestures unavailable"
 
     def _track_webcam_wave(self, center_x: float) -> None:
         now = time.monotonic()
         positions = self._gesture_wave_positions
-        if positions and now - positions[-1][1] > 0.55:
+        if positions and now - positions[-1][1] > 0.42:
             positions.clear()
-        if not positions or abs(center_x - positions[-1][0]) >= 0.025:
+        if not positions or abs(center_x - positions[-1][0]) >= 0.022:
             positions.append((center_x, now))
-        positions[:] = [(x, stamp) for x, stamp in positions if now - stamp <= 1.8]
-        if len(positions) < 5:
+        positions[:] = [(x, stamp) for x, stamp in positions if now - stamp <= 2.2]
+        if len(positions) < 8:
             return
         directions: list[int] = []
+        total_travel = 0.0
         for index in range(1, len(positions)):
             delta = positions[index][0] - positions[index - 1][0]
-            if abs(delta) >= 0.035:
+            total_travel += abs(delta)
+            if abs(delta) >= 0.018:
                 direction = 1 if delta > 0 else -1
                 if not directions or directions[-1] != direction:
                     directions.append(direction)
+        duration = positions[-1][1] - positions[0][1]
+        span = max(position[0] for position in positions) - min(position[0] for position in positions)
         cooldown = int(self.assistant.settings.get("webcam_wave_cooldown_seconds", 8))
-        if len(directions) >= 3 and now - self._gesture_last_wave_at >= max(4, cooldown):
+        strict_wave = len(directions) >= 4 and span >= 0.16 and total_travel >= 0.38 and 0.65 <= duration <= 2.2
+        if strict_wave and now - self._gesture_last_wave_at >= max(4, cooldown):
             self._gesture_last_wave_at = now
             positions.clear()
             self.after(0, self._respond_to_webcam_wave)
@@ -12060,6 +12189,30 @@ document.getElementById('player').appendChild(frame);}
         self.destroy()
 
 
+def run_packaged_hand_tracking_self_test() -> bool:
+    if mp is None or np is None or not hasattr(mp, "tasks") or not HAND_LANDMARKER_MODEL_PATH.exists():
+        return False
+    landmarker = None
+    try:
+        options = mp.tasks.vision.HandLandmarkerOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=str(HAND_LANDMARKER_MODEL_PATH)),
+            running_mode=mp.tasks.vision.RunningMode.VIDEO,
+            num_hands=1,
+        )
+        landmarker = mp.tasks.vision.HandLandmarker.create_from_options(options)
+        blank = np.zeros((64, 64, 3), dtype=np.uint8)
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=blank)
+        landmarker.detect_for_video(image, 1)
+        return True
+    except Exception:
+        return False
+    finally:
+        if landmarker is not None:
+            landmarker.close()
+
+
 if __name__ == "__main__":
+    if "--self-test-hand-tracking" in sys.argv:
+        raise SystemExit(0 if run_packaged_hand_tracking_self_test() else 1)
     app = JarvisApp()
     app.mainloop()
