@@ -337,6 +337,7 @@ Run the Shortcut after JARVIS queues a mobile request. Keep your iPhone and PC o
 - `Music status`
 - `Can you open Apple Music and search my song?` then reply with the song name.
 - `Open Apple Music and search for Bad by Michael Jackson`
+- `Play Jackson's playlist on Apple Music` opens a matching playlist from your library and verifies playback before claiming success.
 - `Play Master of Puppets by Metallica`
 - `Play Master of Puppets on my phone`
 - `Phone bridge setup`

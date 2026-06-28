@@ -118,7 +118,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.9"
+APP_VERSION = "0.1.10"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -1229,6 +1229,25 @@ def clean_music_query_text(query: str) -> str:
     return query[:180]
 
 
+def extract_apple_music_playlist_name(text: str) -> str | None:
+    """Return a spoken Apple Music library playlist name, or None for song requests."""
+    cleaned = re.sub(r"^\s*(?:hey\s+)?jarvis[,\s]+", "", str(text or ""), flags=re.I).strip()
+    cleaned = re.sub(r"^\s*(?:can|could|would)\s+you\s+", "", cleaned, flags=re.I).strip()
+    patterns = [
+        r"\b(?:play|start|open)\s+(.+?\bplaylist)\s+(?:on|in|from|using)\s+(?:my\s+)?apple\s+music(?:\s+library)?\b",
+        r"\b(?:play|start|open)\s+(?:my\s+)?apple\s+music\s+playlist\s+(?:called\s+|named\s+)?(.+)$",
+        r"\b(?:play|start|open)\s+(?:the\s+)?playlist\s+(?:called\s+|named\s+)?(.+?)\s+(?:on|in|from|using)\s+(?:my\s+)?apple\s+music(?:\s+library)?\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, cleaned, flags=re.I | re.S)
+        if match:
+            name = match.group(1).strip(" \t\r\n,.-\"'")
+            name = re.sub(r"^(?:the\s+|my\s+)", "", name, flags=re.I).strip()
+            if name:
+                return name
+    return None
+
+
 def set_windows_clipboard_text(text: str) -> bool:
     """Set clipboard text using Win32 APIs so UI automation can paste exact queries."""
     text_bytes = (text + "\0").encode("utf-16le")
@@ -2265,6 +2284,92 @@ def _click_best_apple_music_result(window: Any, query: str) -> tuple[bool, str]:
         except Exception:
             return False, f"I found a likely result but could not activate it: {combined_text[:120]}"
     return True, combined_text[:160]
+
+
+def _normalized_music_label(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9\s]", " ", text.lower()).split())
+
+
+def _click_best_apple_music_playlist_result(window: Any, playlist_name: str) -> tuple[bool, str]:
+    """Open only a visible playlist whose label strongly matches the requested name."""
+    try:
+        window_rectangle = window.rectangle()
+        controls = window.descendants()
+    except Exception:
+        return False, "Apple Music did not expose its playlist controls."
+
+    wanted = _normalized_music_label(playlist_name)
+    wanted_without_type = re.sub(r"\s+playlist$", "", wanted).strip()
+    candidates: list[tuple[int, int, int, str, Any]] = []
+    for control in controls:
+        try:
+            info = control.element_info
+            if str(info.control_type or "") not in {"DataItem", "ListItem", "Text", "Hyperlink"}:
+                continue
+            if not control.is_visible() or not control.is_enabled():
+                continue
+            rectangle = control.rectangle()
+            if rectangle.top < window_rectangle.top + 150 or rectangle.left < window_rectangle.left + 110:
+                continue
+            label = (control.window_text() or str(info.name or "")).strip()
+            normalized = _normalized_music_label(label)
+            if not normalized or normalized == "playlists":
+                continue
+            score = 0
+            if normalized == wanted:
+                score = 100
+            elif wanted_without_type and normalized == wanted_without_type:
+                score = 95
+            elif wanted in normalized:
+                score = 80
+            elif wanted_without_type and wanted_without_type in normalized:
+                score = 75
+            if score:
+                candidates.append((score, rectangle.top, rectangle.left, label, control))
+        except Exception:
+            continue
+
+    if not candidates:
+        return False, f"I could not find a visible playlist matching '{playlist_name}'."
+    _score, _top, _left, label, control = sorted(candidates, key=lambda item: (-item[0], item[1], item[2]))[0]
+    try:
+        control.click_input(double=True)
+    except Exception:
+        try:
+            control.click_input()
+            if win_keyboard is not None:
+                win_keyboard.send_keys("{ENTER}")
+        except Exception as exc:
+            return False, f"I found playlist '{label}', but could not open it: {exc}"
+    return True, label[:160]
+
+
+def apple_music_open_library_playlist(playlist_name: str, settings: dict[str, Any]) -> tuple[bool, str]:
+    """Search Apple Music for a named library playlist and open a strong match."""
+    launch_allowed_app("apple music", settings)
+    window = _find_apple_music_window()
+    if window is None or win_keyboard is None:
+        return False, "I opened Apple Music, but could not attach to its window."
+    try:
+        window.set_focus()
+        time.sleep(0.5)
+        win_keyboard.send_keys("^f")
+        time.sleep(0.2)
+        win_keyboard.send_keys("^a{BACKSPACE}")
+        if set_windows_clipboard_text(playlist_name):
+            win_keyboard.send_keys("^v")
+        else:
+            win_keyboard.send_keys(playlist_name, with_spaces=True, pause=0.03)
+        win_keyboard.send_keys("{ENTER}")
+        wait_seconds = float(settings.get("apple_music_result_wait_seconds", 4))
+        time.sleep(max(1.0, min(10.0, wait_seconds)))
+        matched, label = _click_best_apple_music_playlist_result(window, playlist_name)
+        if matched:
+            time.sleep(1.0)
+            return True, f"I opened the matched Apple Music playlist '{label}'."
+        return False, label
+    except Exception as exc:
+        return False, f"I tried to open playlist '{playlist_name}', but Apple Music automation failed: {exc}"
 
 
 def apple_music_search_and_press_play(query: str, settings: dict[str, Any]) -> tuple[bool, str]:
@@ -4051,6 +4156,7 @@ class JarvisAssistant:
     def _setup_commands(self) -> None:
         self.command_handlers = [
             (re.compile(r"\bwhat (am i working on|window is open)\b|\bcurrent window\b", re.I), self._active_window),
+            (re.compile(r"\b(?:(?:can|could|would)\s+you\s+)?(?:play|start|open).+\bplaylist\b.+\bapple\s+music\b|\b(?:(?:can|could|would)\s+you\s+)?(?:play|start|open)\s+(?:my\s+)?apple\s+music\s+playlist\b", re.I | re.S), self._apple_music_playlist_command),
             (re.compile(r"\b(?:can you|could you|are you able to|capable of).*(?:apple music|music app).*(?:search|find|play|song|track)\b", re.I), self._request_apple_music_song),
             (re.compile(r"\b(?:open|launch|use)\s+apple music\s+(?:and\s+)?(?:search|find|play)(?:\s+for)?\s+(.+)", re.I | re.S), self._apple_music_search_command),
             (re.compile(r"\b(?:search|find)\s+(?:apple music|music app)\s+(?:for\s+)?(.+)", re.I | re.S), self._apple_music_search_command),
@@ -4823,7 +4929,7 @@ class JarvisAssistant:
                 raise
         return f"I tried to inspect the screen, but Gemini vision was unavailable. ({last_error})"
 
-    def locate_apple_music_play_target(self, query: str) -> tuple[bool, str, int | None, int | None]:
+    def locate_apple_music_play_target(self, query: str, media_kind: str = "song") -> tuple[bool, str, int | None, int | None]:
         if genai is None or genai_types is None or self.gemini_client is None:
             return False, "Gemini vision is not configured.", None, None
         try:
@@ -4831,14 +4937,29 @@ class JarvisAssistant:
         except Exception as exc:
             return False, f"Screen capture failed: {exc}", None, None
 
-        prompt = (
-            "You are helping control Apple Music on Windows from a screenshot.\n"
-            f"The user requested this exact song/search: {query!r}.\n"
-            f"The screenshot's original screen size is {original_size[0]}x{original_size[1]} pixels.\n"
+        playlist_request = media_kind == "playlist"
+        target_label = "playlist" if playlist_request else "song/search"
+        selection_rules = (
+            "Find the visible Apple Music playlist result that best matches the requested playlist name. "
+            "Choose only a PLAYLIST result; do not choose songs, albums, artists, radio stations, or generic category labels.\n"
+            if playlist_request
+            else
             "Find the visible Apple Music search result that best matches the requested song and artist.\n"
             "Prefer a SONG/TRACK result. Do not choose playlists, albums, artist pages, essentials collections, radio, or unrelated tracks.\n"
+        )
+        click_rules = (
+            "Return coordinates near the matching playlist artwork or title that would open the playlist.\n"
+            if playlist_request
+            else
             "If the exact song result is visible, return coordinates for its play button if visible; otherwise return coordinates near the matching song row/title that would open/play it.\n"
-            "Never return coordinates on the vertical scrollbar, page scroll area, far-right edge, sidebar navigation, or window chrome. "
+        )
+        prompt = (
+            "You are helping control Apple Music on Windows from a screenshot.\n"
+            f"The user requested this exact {target_label}: {query!r}.\n"
+            f"The screenshot's original screen size is {original_size[0]}x{original_size[1]} pixels.\n"
+            + selection_rules
+            + click_rules
+            + "Never return coordinates on the vertical scrollbar, page scroll area, far-right edge, sidebar navigation, or window chrome. "
             "The x coordinate should be inside the song result row/play/title area, usually well left of the right edge.\n"
             "Return only compact JSON with this schema: "
             "{\"found\":true|false,\"x\":number|null,\"y\":number|null,\"confidence\":0-100,\"reason\":\"short\"}.\n"
@@ -4893,7 +5014,7 @@ class JarvisAssistant:
                 raise
         return False, f"Gemini vision could not locate the play target: {last_error}", None, None
 
-    def locate_apple_music_visible_play_button(self, query: str) -> tuple[bool, str, int | None, int | None]:
+    def locate_apple_music_visible_play_button(self, query: str, media_kind: str = "song") -> tuple[bool, str, int | None, int | None]:
         if genai is None or genai_types is None or self.gemini_client is None:
             return False, "Gemini vision is not configured.", None, None
         try:
@@ -4901,12 +5022,13 @@ class JarvisAssistant:
         except Exception as exc:
             return False, f"Screen capture failed: {exc}", None, None
 
+        target_label = "playlist" if media_kind == "playlist" else "song/search result"
         prompt = (
             "You are helping control Apple Music on Windows from a screenshot after a search result was selected.\n"
-            f"The user requested this exact song/search: {query!r}.\n"
+            f"The user requested this exact {target_label}: {query!r}.\n"
             f"The screenshot's original screen size is {original_size[0]}x{original_size[1]} pixels.\n"
-            "Find the visible Play button that would start playback for the selected matching song, song page, album page, "
-            "or opened result. Prefer the large/main play button near the selected result or page header.\n"
+            f"Find the visible Play button that would start playback for the selected matching {target_label}. "
+            "Prefer the large/main play button near the selected result or page header.\n"
             "Do not choose the vertical scrollbar, page scroll area, far-right edge, sidebar navigation, window chrome, "
             "AirPlay, replay, mini-player controls, or unrelated top navigation buttons.\n"
             "Return the center of the Play button, not the song title text and not an empty part of the row.\n"
@@ -4952,7 +5074,7 @@ class JarvisAssistant:
                 raise
         return False, f"Gemini vision could not locate the Play button: {last_error}", None, None
 
-    def verify_apple_music_playback(self, query: str) -> tuple[bool, str]:
+    def verify_apple_music_playback(self, query: str, media_kind: str = "song") -> tuple[bool, str]:
         if genai is None or genai_types is None or self.gemini_client is None:
             return False, "Gemini vision is not configured, so playback could not be verified."
         try:
@@ -4960,9 +5082,10 @@ class JarvisAssistant:
         except Exception as exc:
             return False, f"Screen capture failed during playback verification: {exc}"
 
+        target_label = "playlist" if media_kind == "playlist" else "song/search"
         prompt = (
             "You are verifying Apple Music playback on Windows from a screenshot.\n"
-            f"The user requested this song/search: {query!r}.\n"
+            f"The user requested this {target_label}: {query!r}.\n"
             f"The screenshot size is {original_size[0]}x{original_size[1]} pixels.\n"
             "Return whether music appears to be actively playing. Strong evidence includes a Pause button, animated/active "
             "now-playing controls, or the requested track visible in the now-playing area with playback active. "
@@ -5216,6 +5339,12 @@ class JarvisAssistant:
             return f"Should I play '{query}' on this device, or on your mobile device, sir?"
         return self._play_apple_music_query(query)
 
+    def _apple_music_playlist_command(self, _match: re.Match[str], text: str) -> str:
+        playlist_name = extract_apple_music_playlist_name(text)
+        if not playlist_name:
+            return "Tell me the playlist name, for example: play Jackson's playlist on Apple Music."
+        return self._play_apple_music_playlist(playlist_name)
+
     def _clean_music_query(self, query: str) -> str:
         return clean_music_query_text(query)
 
@@ -5317,6 +5446,44 @@ class JarvisAssistant:
             webbrowser.open(f"https://music.apple.com/us/search?term={encoded}")
             return f"I opened Apple Music search for '{query}'. I did not press play because UI automation is disabled."
         return f"I opened Apple Music for '{query}', but browser fallback is disabled and UI automation is off."
+
+    def _play_apple_music_playlist(self, playlist_name: str) -> str:
+        playlist_name = playlist_name.strip()
+        if not playlist_name:
+            return "Give me the name of an Apple Music playlist first."
+        if not self.settings.get("apple_music_ui_automation", True):
+            return "Apple Music UI automation is disabled, so I cannot safely select a library playlist."
+
+        opened, message = apple_music_open_library_playlist(playlist_name, self.settings)
+        if not opened:
+            visual_found, visual_reason, target_x, target_y = self.locate_apple_music_play_target(
+                playlist_name, media_kind="playlist"
+            )
+            if not visual_found or target_x is None or target_y is None:
+                return f"{message} Vision could not verify the playlist either: {visual_reason} I did not press Play."
+            click_mouse(target_x, target_y)
+            time.sleep(1.4)
+            message = f"I visually matched and opened playlist '{playlist_name}'. {visual_reason}"
+
+        play_found, play_reason, play_x, play_y = self.locate_apple_music_visible_play_button(
+            playlist_name, media_kind="playlist"
+        )
+        if play_found and play_x is not None and play_y is not None:
+            click_mouse(play_x, play_y)
+            time.sleep(1.5)
+            verified, verify_reason = self.verify_apple_music_playback(playlist_name, media_kind="playlist")
+            if verified:
+                return f"{message} I clicked Play and verified that the playlist started. {verify_reason}"
+            return f"{message} I clicked its Play button, but could not verify playback. {verify_reason}"
+
+        window = _find_apple_music_window(timeout_seconds=2)
+        if window is not None and _click_first_apple_music_play_button(window):
+            time.sleep(1.5)
+            verified, verify_reason = self.verify_apple_music_playback(playlist_name, media_kind="playlist")
+            if verified:
+                return f"{message} I pressed Play and verified that the playlist started. {verify_reason}"
+            return f"{message} I pressed the visible Play control, but could not verify playback. {verify_reason}"
+        return f"{message} I could not safely locate its Play button. {play_reason}"
 
     def _volume_control(self, match: re.Match[str], _text: str) -> str:
         direction = (match.group(1) or match.group(2) or "").lower()
