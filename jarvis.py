@@ -41,7 +41,7 @@ import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from functools import partial
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from typing import Any, Callable
 
 import customtkinter as ctk
@@ -99,6 +99,12 @@ try:
 except Exception:
     keyboard = None
 
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+try:
+    import pygame
+except Exception:
+    pygame = None
+
 
 APP_NAME = "JARVIS Desktop Assistant"
 PERMISSION_MODES = ("Ask for approval", "Approve for me", "Full access")
@@ -118,7 +124,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.1.10"
+APP_VERSION = "0.2.0"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -306,6 +312,7 @@ DEFAULT_DRAGGABLE_PANEL_LAYOUT = {
     "video_news": {"relx": 0.54, "rely": 0.10, "relw": 0.40, "relh": 0.60},
     "video": {"relx": 0.14, "rely": 0.12, "relw": 0.50, "relh": 0.66},
     "browser": {"relx": 0.08, "rely": 0.06, "relw": 0.82, "relh": 0.82},
+    "music_player": {"relx": 0.16, "rely": 0.10, "relw": 0.66, "relh": 0.72},
 }
 
 DEFAULT_SETTINGS = {
@@ -317,6 +324,12 @@ DEFAULT_SETTINGS = {
     "music_open_browser_fallback": True,
     "music_confirm_before_clicking": False,
     "playlist_overrides": {},
+    "local_music_library": [],
+    "local_music_playlists": {},
+    "local_music_volume": 0.72,
+    "local_music_startup_enabled": False,
+    "local_music_startup_type": "off",
+    "local_music_startup_value": "",
     "wake_phrase": "jarvis",
     "theme": "dark",
     "ai_provider": "gemini",
@@ -458,6 +471,7 @@ DEFAULT_SETTINGS = {
     "command_center_video_news_visible": False,
     "command_center_video_visible": False,
     "command_center_browser_visible": False,
+    "command_center_music_player_visible": False,
     "last_workspace_layout": "Full Command Center",
     "workspace_layouts": DEFAULT_WORKSPACE_LAYOUTS,
     "gesture_actions": DEFAULT_GESTURE_ACTIONS,
@@ -6115,6 +6129,152 @@ class JarvisAssistant:
         messagebox.showinfo("JARVIS", f"Focus timer complete: {minutes} minutes.")
 
 
+LOCAL_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"}
+
+
+def discover_local_audio_files(folder: str | Path) -> list[str]:
+    root = Path(folder).expanduser()
+    if not root.is_dir():
+        return []
+    found: list[str] = []
+    for path in root.rglob("*"):
+        try:
+            if path.is_file() and path.suffix.lower() in LOCAL_AUDIO_EXTENSIONS:
+                found.append(str(path.resolve()))
+        except OSError:
+            continue
+    return sorted(found, key=lambda item: Path(item).name.lower())
+
+
+def clean_local_music_paths(paths: list[Any]) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in paths:
+        path = Path(str(value)).expanduser()
+        try:
+            resolved = str(path.resolve())
+        except OSError:
+            continue
+        key = resolved.lower()
+        if key in seen or not path.is_file() or path.suffix.lower() not in LOCAL_AUDIO_EXTENSIONS:
+            continue
+        seen.add(key)
+        cleaned.append(resolved)
+    return cleaned
+
+
+class LocalMusicPlayer:
+    """Small queue-based local audio player used by the in-app music panel."""
+
+    def __init__(self, volume: float = 0.72) -> None:
+        self.available = pygame is not None
+        self.initialized = False
+        self.error = "" if self.available else "pygame-ce is not installed."
+        self.volume = max(0.0, min(1.0, float(volume)))
+        self.queue: list[str] = []
+        self.index = -1
+        self.paused = False
+        self.started_at = 0.0
+        self._last_busy = False
+    def _ensure_initialized(self) -> bool:
+        if not self.available:
+            return False
+        if self.initialized:
+            return True
+        try:
+            pygame.mixer.init()
+            pygame.mixer.music.set_volume(self.volume)
+            self.initialized = True
+            self.error = ""
+            return True
+        except Exception as exc:
+            self.error = f"Audio engine could not start: {exc}"
+            return False
+
+    @property
+    def current_path(self) -> str:
+        if 0 <= self.index < len(self.queue):
+            return self.queue[self.index]
+        return ""
+
+    def play_queue(self, tracks: list[str], start_index: int = 0) -> tuple[bool, str]:
+        valid = clean_local_music_paths(tracks)
+        if not self._ensure_initialized():
+            return False, self.error
+        if not valid:
+            return False, "No playable local audio files were found."
+        self.queue = valid
+        self.index = max(0, min(int(start_index), len(valid) - 1))
+        return self._play_current()
+
+    def _play_current(self) -> tuple[bool, str]:
+        path = self.current_path
+        if not path:
+            return False, "The local music queue is empty."
+        try:
+            pygame.mixer.music.load(path)
+            pygame.mixer.music.play()
+            self.paused = False
+            self.started_at = time.monotonic()
+            self._last_busy = True
+            return True, Path(path).stem
+        except Exception as exc:
+            return False, f"Could not play {Path(path).name}: {exc}"
+
+    def toggle_pause(self) -> tuple[bool, str]:
+        if not self.initialized or not self.current_path:
+            return False, "Nothing is playing in JARVIS Music."
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+            self._last_busy = True
+            return True, "Playing"
+        pygame.mixer.music.pause()
+        self.paused = True
+        return True, "Paused"
+
+    def stop(self) -> None:
+        if self.initialized:
+            pygame.mixer.music.stop()
+        self.paused = False
+        self._last_busy = False
+
+    def next(self) -> tuple[bool, str]:
+        if not self.queue:
+            return False, "The local music queue is empty."
+        self.index = (self.index + 1) % len(self.queue)
+        return self._play_current()
+
+    def previous(self) -> tuple[bool, str]:
+        if not self.queue:
+            return False, "The local music queue is empty."
+        self.index = (self.index - 1) % len(self.queue)
+        return self._play_current()
+
+    def set_volume(self, value: float) -> None:
+        self.volume = max(0.0, min(1.0, float(value)))
+        if self.initialized:
+            pygame.mixer.music.set_volume(self.volume)
+
+    def should_advance(self) -> bool:
+        if not self.initialized or self.paused or not self.current_path or time.monotonic() - self.started_at < 1.0:
+            return False
+        busy = bool(pygame.mixer.music.get_busy())
+        ended = self._last_busy and not busy
+        self._last_busy = busy
+        return ended
+
+    def shutdown(self) -> None:
+        if not self.initialized:
+            return
+        try:
+            pygame.mixer.music.stop()
+            pygame.mixer.quit()
+            self.initialized = False
+        except Exception:
+            pass
+
+
 class JarvisApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -6191,6 +6351,19 @@ class JarvisApp(ctk.CTk):
         self._browser_resize_after: str | None = None
         self._browser_restore_layout: dict[str, float] | None = None
         self.browser_fill_button: ctk.CTkButton | None = None
+        self.music_player_panel: ctk.CTkFrame | None = None
+        self.music_library_listbox: tk.Listbox | None = None
+        self.music_playlist_listbox: tk.Listbox | None = None
+        self.music_startup_menu: ctk.CTkOptionMenu | None = None
+        self.music_startup_lookup: dict[str, tuple[str, str]] = {"Off": ("off", "")}
+        self.local_music_player = LocalMusicPlayer(float(self.assistant.settings.get("local_music_volume", 0.72)))
+        self.local_music_now_var = ctk.StringVar(value="Nothing playing")
+        self.local_music_state_var = ctk.StringVar(
+            value="JARVIS Music ready" if self.local_music_player.available else self.local_music_player.error
+        )
+        self.local_music_startup_var = ctk.StringVar(value="Off")
+        self.local_music_volume_var = ctk.DoubleVar(value=float(self.assistant.settings.get("local_music_volume", 0.72)))
+        self._music_volume_save_after: str | None = None
         self.floating_panels: dict[str, ctk.CTkToplevel] = {}
         self.gesture_points: list[tuple[int, int]] = []
         self.gesture_canvas: ctk.CTkCanvas | None = None
@@ -6248,7 +6421,7 @@ class JarvisApp(ctk.CTk):
         self._session_panel_layout: dict[str, dict[str, float]] = json.loads(json.dumps(DEFAULT_DRAGGABLE_PANEL_LAYOUT))
         self._session_panel_visibility = {
             panel: False
-            for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser"]
+            for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser", "music_player"]
         }
         self._layout_autosave_after: str | None = None
         self._layout_autosave_ready = False
@@ -6307,6 +6480,8 @@ class JarvisApp(ctk.CTk):
         self._start_location_refresh()
         self._start_health_bridge_if_enabled()
         self._start_phone_bridge_if_enabled()
+        self.after(700, self._poll_local_music_player)
+        self.after(3200, self._start_local_music_autoplay)
         threading.Thread(target=self._tts_worker, daemon=True).start()
         if self.wake_enabled_var.get():
             self.after(1400, self.start_wake_listener)
@@ -6768,10 +6943,11 @@ class JarvisApp(ctk.CTk):
 
         permission_controls = ctk.CTkFrame(command_header, fg_color="transparent")
         permission_controls.grid(row=1, column=1, sticky="e", padx=18, pady=(0, 10))
-        ctk.CTkButton(permission_controls, text="News", width=64, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=self.open_news_panel).grid(row=0, column=0, padx=(0, 6))
-        ctk.CTkButton(permission_controls, text="Videos", width=70, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=self.open_video_news_panel).grid(row=0, column=1, padx=6)
-        ctk.CTkButton(permission_controls, text="Code", width=64, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=lambda: self._toggle_command_center_panel("code")).grid(row=0, column=2, padx=(6, 10))
-        ctk.CTkLabel(permission_controls, text="Permissions", text_color=UI_MUTED).grid(row=0, column=3, padx=(0, 8))
+        ctk.CTkButton(permission_controls, text="Music", width=64, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=self.open_local_music_player_panel).grid(row=0, column=0, padx=(0, 6))
+        ctk.CTkButton(permission_controls, text="News", width=64, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=self.open_news_panel).grid(row=0, column=1, padx=6)
+        ctk.CTkButton(permission_controls, text="Videos", width=70, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=self.open_video_news_panel).grid(row=0, column=2, padx=6)
+        ctk.CTkButton(permission_controls, text="Code", width=64, height=30, fg_color=UI_CARD, hover_color=UI_BORDER_SOFT, command=lambda: self._toggle_command_center_panel("code")).grid(row=0, column=3, padx=(6, 10))
+        ctk.CTkLabel(permission_controls, text="Permissions", text_color=UI_MUTED).grid(row=0, column=4, padx=(0, 8))
         self.permission_menu = ctk.CTkOptionMenu(
             permission_controls,
             values=list(PERMISSION_MODES),
@@ -6782,7 +6958,7 @@ class JarvisApp(ctk.CTk):
             button_color=UI_BORDER,
             button_hover_color="#2898c5",
         )
-        self.permission_menu.grid(row=0, column=4)
+        self.permission_menu.grid(row=0, column=5)
 
         workspace = ctk.CTkFrame(main, fg_color=UI_BG, corner_radius=0)
         self.workspace_frame = workspace
@@ -7117,6 +7293,81 @@ class JarvisApp(ctk.CTk):
         self.browser_surface = tk.Frame(browser_panel, bg="#02050a", highlightthickness=1, highlightbackground=UI_BORDER_SOFT)
         self.browser_surface.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self.browser_surface.bind("<Configure>", self._resize_embedded_browser, add="+")
+
+        music_panel = ctk.CTkFrame(workspace, fg_color=UI_PANEL_ALT, corner_radius=10, border_width=1, border_color=UI_BORDER_SOFT)
+        self.music_player_panel = music_panel
+        music_panel.grid_columnconfigure(0, weight=1)
+        music_panel.grid_rowconfigure(3, weight=1)
+        music_handle = self._panel_drag_handle(music_panel, "JARVIS MUSIC")
+        music_handle.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
+
+        now_frame = ctk.CTkFrame(music_panel, fg_color=UI_CARD, corner_radius=8, border_width=1, border_color=UI_BORDER_SOFT)
+        now_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(8, 5))
+        now_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(now_frame, text="NOW PLAYING", text_color=UI_MAGENTA, font=ctk.CTkFont(size=10, weight="bold"), anchor="w").grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
+        ctk.CTkLabel(now_frame, textvariable=self.local_music_now_var, text_color=UI_TEXT, font=ctk.CTkFont(size=17, weight="bold"), anchor="w").grid(row=1, column=0, sticky="ew", padx=12, pady=(1, 0))
+        ctk.CTkLabel(now_frame, textvariable=self.local_music_state_var, text_color=UI_MUTED, anchor="w").grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        player_controls = ctk.CTkFrame(music_panel, fg_color="transparent")
+        player_controls.grid(row=2, column=0, sticky="ew", padx=10, pady=5)
+        player_controls.grid_columnconfigure(5, weight=1)
+        control_style = {"height": 32, "fg_color": UI_CARD, "hover_color": UI_BORDER_SOFT}
+        ctk.CTkButton(player_controls, text="Previous", width=78, command=self._local_music_previous, **control_style).grid(row=0, column=0, padx=(0, 4))
+        ctk.CTkButton(player_controls, text="Play/Pause", width=92, command=self._local_music_toggle_pause, fg_color=UI_BORDER, hover_color="#2898c5").grid(row=0, column=1, padx=4)
+        ctk.CTkButton(player_controls, text="Next", width=62, command=self._local_music_next, **control_style).grid(row=0, column=2, padx=4)
+        ctk.CTkButton(player_controls, text="Stop", width=62, command=self._local_music_stop, **control_style).grid(row=0, column=3, padx=4)
+        ctk.CTkLabel(player_controls, text="Volume", text_color=UI_MUTED).grid(row=0, column=4, padx=(12, 5))
+        ctk.CTkSlider(player_controls, from_=0, to=1, variable=self.local_music_volume_var, command=self._set_local_music_volume, width=130).grid(row=0, column=5, sticky="w", padx=(0, 8))
+        ctk.CTkButton(player_controls, text="Hide", width=58, command=lambda: self._set_command_center_panel_visible("music_player", False), **control_style).grid(row=0, column=6, padx=(4, 0))
+
+        music_tabs = ctk.CTkTabview(music_panel, fg_color=UI_PANEL_DEEP, segmented_button_fg_color=UI_CARD, segmented_button_selected_color=UI_BORDER)
+        music_tabs.grid(row=3, column=0, sticky="nsew", padx=10, pady=(4, 10))
+        library_tab = music_tabs.add("Library")
+        playlists_tab = music_tabs.add("Playlists")
+        settings_tab = music_tabs.add("Startup")
+        for tab in (library_tab, playlists_tab, settings_tab):
+            tab.grid_columnconfigure(0, weight=1)
+            tab.grid_rowconfigure(1, weight=1)
+
+        library_actions = ctk.CTkFrame(library_tab, fg_color="transparent")
+        library_actions.grid(row=0, column=0, sticky="ew", pady=(6, 5))
+        ctk.CTkButton(library_actions, text="Add Songs", width=92, command=self._import_local_music_files).pack(side="left", padx=(4, 4))
+        ctk.CTkButton(library_actions, text="Add Folder", width=96, command=self._import_local_music_folder).pack(side="left", padx=4)
+        ctk.CTkButton(library_actions, text="Play Selected", width=108, command=self._play_selected_local_music).pack(side="left", padx=4)
+        ctk.CTkButton(library_actions, text="New Playlist", width=104, command=self._create_local_music_playlist).pack(side="left", padx=4)
+        ctk.CTkButton(library_actions, text="Remove", width=72, fg_color="#49303a", hover_color="#6a3d4b", command=self._remove_selected_local_music).pack(side="right", padx=4)
+        library_list_frame = tk.Frame(library_tab, bg="#06101c", highlightthickness=1, highlightbackground="#123f5a")
+        library_list_frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 6))
+        library_list_frame.grid_columnconfigure(0, weight=1)
+        library_list_frame.grid_rowconfigure(0, weight=1)
+        self.music_library_listbox = tk.Listbox(library_list_frame, selectmode=tk.EXTENDED, bg="#06101c", fg="#e6fbff", selectbackground="#17627f", selectforeground="#ffffff", relief="flat", highlightthickness=0, font=("Segoe UI", 11), activestyle="none")
+        library_scrollbar = tk.Scrollbar(library_list_frame, orient="vertical", command=self.music_library_listbox.yview)
+        self.music_library_listbox.configure(yscrollcommand=library_scrollbar.set)
+        self.music_library_listbox.grid(row=0, column=0, sticky="nsew")
+        library_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.music_library_listbox.bind("<Double-Button-1>", lambda _event: self._play_selected_local_music())
+
+        playlist_actions = ctk.CTkFrame(playlists_tab, fg_color="transparent")
+        playlist_actions.grid(row=0, column=0, sticky="ew", pady=(6, 5))
+        ctk.CTkButton(playlist_actions, text="Play Playlist", width=104, command=self._play_selected_local_playlist).pack(side="left", padx=4)
+        ctk.CTkButton(playlist_actions, text="Delete", width=72, fg_color="#49303a", hover_color="#6a3d4b", command=self._delete_selected_local_playlist).pack(side="right", padx=4)
+        playlist_list_frame = tk.Frame(playlists_tab, bg="#06101c", highlightthickness=1, highlightbackground="#123f5a")
+        playlist_list_frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 6))
+        playlist_list_frame.grid_columnconfigure(0, weight=1)
+        playlist_list_frame.grid_rowconfigure(0, weight=1)
+        self.music_playlist_listbox = tk.Listbox(playlist_list_frame, bg="#06101c", fg="#e6fbff", selectbackground="#17627f", selectforeground="#ffffff", relief="flat", highlightthickness=0, font=("Segoe UI", 11), activestyle="none")
+        playlist_scrollbar = tk.Scrollbar(playlist_list_frame, orient="vertical", command=self.music_playlist_listbox.yview)
+        self.music_playlist_listbox.configure(yscrollcommand=playlist_scrollbar.set)
+        self.music_playlist_listbox.grid(row=0, column=0, sticky="nsew")
+        playlist_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.music_playlist_listbox.bind("<Double-Button-1>", lambda _event: self._play_selected_local_playlist())
+
+        ctk.CTkLabel(settings_tab, text="AUTOPLAY WHEN JARVIS OPENS", text_color=UI_CYAN, font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, sticky="ew", padx=12, pady=(18, 5))
+        self.music_startup_menu = ctk.CTkOptionMenu(settings_tab, values=["Off"], variable=self.local_music_startup_var, command=self._set_local_music_startup_choice, fg_color=UI_CARD, button_color=UI_BORDER, button_hover_color="#2898c5")
+        self.music_startup_menu.grid(row=1, column=0, sticky="new", padx=12, pady=5)
+        ctk.CTkLabel(settings_tab, text="Choose one saved song or playlist. JARVIS stores its local path, never a copy of the audio file.", text_color=UI_MUTED, anchor="nw", justify="left", wraplength=520).grid(row=2, column=0, sticky="ew", padx=12, pady=8)
+
+        self._refresh_local_music_panel()
 
         input_frame = ctk.CTkFrame(self, fg_color=UI_PANEL, corner_radius=0)
         input_frame.grid(row=1, column=0, sticky="ew")
@@ -7713,6 +7964,8 @@ class JarvisApp(ctk.CTk):
             return self.video_panel
         if panel == "browser":
             return self.browser_panel
+        if panel == "music_player":
+            return self.music_player_panel
         return None
 
     def _panel_layout(self, panel: str) -> dict[str, float]:
@@ -7738,6 +7991,7 @@ class JarvisApp(ctk.CTk):
             ("video_news", self.video_news_panel),
             ("video", self.video_panel),
             ("browser", self.browser_panel),
+            ("music_player", self.music_player_panel),
         ]
         for key, panel in panels:
             if panel is None:
@@ -7761,7 +8015,7 @@ class JarvisApp(ctk.CTk):
             target.bind("<ButtonRelease-1>", lambda event, item=panel: self._finish_panel_resize(item, event))
 
     def _place_command_panels(self) -> None:
-        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser"]:
+        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser", "music_player"]:
             if self._session_panel_visibility.get(panel, False):
                 self._place_command_panel(panel)
 
@@ -7875,6 +8129,8 @@ class JarvisApp(ctk.CTk):
             return (500, 420)
         if panel == "browser":
             return (700, 480)
+        if panel == "music_player":
+            return (560, 420)
         return (320, 200)
 
     def _maximum_panel_size_ratio(self, panel: str) -> tuple[float, float]:
@@ -7896,6 +8152,8 @@ class JarvisApp(ctk.CTk):
             return (0.60, 0.76)
         if panel == "browser":
             return (0.99, 0.99)
+        if panel == "music_player":
+            return (0.82, 0.88)
         return (0.50, 0.50)
 
     def _resize_command_panel(self, panel: str, event: Any) -> None:
@@ -7932,14 +8190,14 @@ class JarvisApp(ctk.CTk):
 
     def _reset_draggable_panel_layout(self) -> None:
         self._session_panel_layout = json.loads(json.dumps(DEFAULT_DRAGGABLE_PANEL_LAYOUT))
-        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser"]:
+        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser", "music_player"]:
             self._session_panel_visibility[panel] = False
         self._apply_command_center_visibility()
         self._set_command_status("Command Center layout reset")
         self._append_chat("System", "Command Center panels reset inside the main window.")
 
     def _apply_command_center_visibility(self) -> None:
-        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser"]:
+        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser", "music_player"]:
             widget = self._panel_widget(panel)
             if widget is None:
                 continue
@@ -7974,6 +8232,8 @@ class JarvisApp(ctk.CTk):
             widget = self.video_panel
         elif panel == "browser":
             widget = self.browser_panel
+        elif panel == "music_player":
+            widget = self.music_player_panel
 
         if widget is None:
             return
@@ -8021,7 +8281,7 @@ class JarvisApp(ctk.CTk):
         controls.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
         for column in range(3):
             controls.grid_columnconfigure(column, weight=1)
-        for index, panel in enumerate(["core", "chat", "side", "code", "news", "article", "video", "browser"]):
+        for index, panel in enumerate(["core", "chat", "side", "code", "news", "article", "video", "browser", "music_player"]):
             ctk.CTkButton(
                 controls,
                 text=f"Toggle {panel.replace('_', ' ').title()}",
@@ -8040,7 +8300,7 @@ class JarvisApp(ctk.CTk):
         ctk.CTkButton(
             layout_tools,
             text="Restore All Panels",
-            command=lambda: [self._set_command_center_panel_visible(panel, True) for panel in ["core", "chat", "side", "code", "news", "article", "video", "browser"]],
+            command=lambda: [self._set_command_center_panel_visible(panel, True) for panel in ["core", "chat", "side", "code", "news", "article", "video", "browser", "music_player"]],
         ).grid(row=0, column=1, sticky="ew", padx=8, pady=10)
 
     def _floating_panel_specs(self) -> list[tuple[str, ctk.StringVar, str]]:
@@ -8703,7 +8963,7 @@ class JarvisApp(ctk.CTk):
 
     def _apply_workspace_layout(self, layout: dict[str, Any]) -> None:
         name = str(layout.get("name", "Workspace"))
-        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser"]:
+        for panel in ["core", "chat", "side", "code", "news", "article", "video_news", "video", "browser", "music_player"]:
             if panel in layout:
                 self._set_command_center_panel_visible(panel, bool(layout.get(panel)))
         geometry = str(layout.get("geometry", "")).strip()
@@ -8959,7 +9219,8 @@ class JarvisApp(ctk.CTk):
 
         buttons = [
             ("Apps", self.open_app_whitelist_window),
-            ("Music", self.open_music_window),
+            ("JARVIS Music", self.open_local_music_player_panel),
+            ("Music Settings", self.open_music_window),
             ("Memory", self.open_memory_window),
             ("Mic", self.open_microphone_window),
             ("News", self.open_news_panel),
@@ -10237,6 +10498,257 @@ document.getElementById('player').appendChild(frame);}
                 command=lambda memory_id=str(memory.get("id", "")): self._remove_memory_by_id(memory_id, list_frame),
             )
             remove.grid(row=0, column=1, padx=10, pady=8)
+
+    def open_local_music_player_panel(self) -> None:
+        self._set_command_center_panel_visible("music_player", True)
+        self._refresh_local_music_panel()
+
+    def _local_music_library(self) -> list[str]:
+        library = clean_local_music_paths(list(self.assistant.settings.get("local_music_library", [])))
+        if library != self.assistant.settings.get("local_music_library", []):
+            self.assistant.settings["local_music_library"] = library
+            save_settings(self.assistant.settings)
+        return library
+
+    def _local_music_playlists(self) -> dict[str, list[str]]:
+        raw = self.assistant.settings.get("local_music_playlists", {})
+        if not isinstance(raw, dict):
+            return {}
+        return {str(name): clean_local_music_paths(list(paths)) for name, paths in raw.items() if isinstance(paths, list)}
+
+    def _refresh_local_music_panel(self) -> None:
+        library = self._local_music_library()
+        playlists = self._local_music_playlists()
+        self._music_library_rows = library
+        self._music_playlist_rows = sorted(playlists, key=str.lower)
+        if self.music_library_listbox is not None:
+            self.music_library_listbox.delete(0, tk.END)
+            for path in library:
+                self.music_library_listbox.insert(tk.END, f"{Path(path).stem}    [{Path(path).parent.name}]")
+        if self.music_playlist_listbox is not None:
+            self.music_playlist_listbox.delete(0, tk.END)
+            for name in self._music_playlist_rows:
+                count = len(playlists.get(name, []))
+                self.music_playlist_listbox.insert(tk.END, f"{name}    ({count} track{'s' if count != 1 else ''})")
+        self._refresh_local_music_startup_choices(library, playlists)
+
+    def _refresh_local_music_startup_choices(self, library: list[str], playlists: dict[str, list[str]]) -> None:
+        lookup: dict[str, tuple[str, str]] = {"Off": ("off", "")}
+        for path in library:
+            base = f"Song: {Path(path).stem}"
+            label = base
+            suffix = 2
+            while label in lookup:
+                label = f"{base} ({suffix})"
+                suffix += 1
+            lookup[label] = ("song", path)
+        for name in sorted(playlists, key=str.lower):
+            lookup[f"Playlist: {name}"] = ("playlist", name)
+        self.music_startup_lookup = lookup
+        if self.music_startup_menu is not None:
+            self.music_startup_menu.configure(values=list(lookup))
+        selected_type = str(self.assistant.settings.get("local_music_startup_type", "off"))
+        selected_value = str(self.assistant.settings.get("local_music_startup_value", ""))
+        selected_label = next((label for label, choice in lookup.items() if choice == (selected_type, selected_value)), "Off")
+        self.local_music_startup_var.set(selected_label)
+
+    def _import_local_music_files(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Add songs to JARVIS Music",
+            filetypes=[("Audio files", "*.mp3 *.wav *.ogg *.flac *.m4a *.aac"), ("All files", "*.*")],
+        )
+        self._add_local_music_paths(list(paths))
+
+    def _import_local_music_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Add a music folder to JARVIS Music")
+        if not folder:
+            return
+        self._set_command_status("Scanning music folder...")
+        paths = discover_local_audio_files(folder)
+        self._add_local_music_paths(paths)
+
+    def _add_local_music_paths(self, paths: list[str]) -> None:
+        before = self._local_music_library()
+        combined = clean_local_music_paths([*before, *paths])
+        self.assistant.settings["local_music_library"] = combined
+        save_settings(self.assistant.settings)
+        self._refresh_local_music_panel()
+        added = len(combined) - len(before)
+        message = f"Added {added} song{'s' if added != 1 else ''} to JARVIS Music."
+        self._append_chat("System", message)
+        self._set_command_status(message)
+
+    def _selected_local_music_paths(self) -> list[str]:
+        if self.music_library_listbox is None:
+            return []
+        rows = getattr(self, "_music_library_rows", [])
+        return [rows[index] for index in self.music_library_listbox.curselection() if 0 <= index < len(rows)]
+
+    def _play_selected_local_music(self) -> None:
+        selected = self._selected_local_music_paths()
+        if not selected:
+            self._append_chat("System", "Select one or more songs in the JARVIS Music library first.")
+            return
+        self._play_local_music_queue(selected)
+
+    def _play_local_music_queue(self, tracks: list[str], start_index: int = 0) -> tuple[bool, str]:
+        ok, detail = self.local_music_player.play_queue(tracks, start_index=start_index)
+        if ok:
+            self.local_music_now_var.set(detail)
+            self.local_music_state_var.set(f"Playing {self.local_music_player.index + 1} of {len(self.local_music_player.queue)}")
+            self.music_var.set(f"JARVIS Music: {detail}")
+            self._set_command_status(f"Playing {detail}")
+        else:
+            self.local_music_state_var.set(detail)
+            self._append_chat("System", detail)
+        return ok, detail
+
+    def _create_local_music_playlist(self) -> None:
+        selected = self._selected_local_music_paths()
+        if not selected:
+            self._append_chat("System", "Select the songs for the new playlist first.")
+            return
+        name = simpledialog.askstring("New JARVIS Playlist", "Playlist name:", parent=self)
+        if not name or not name.strip():
+            return
+        name = name.strip()[:80]
+        playlists = self._local_music_playlists()
+        if name in playlists and not messagebox.askyesno("Replace Playlist", f"Replace the existing playlist '{name}'?", parent=self):
+            return
+        playlists[name] = selected
+        self.assistant.settings["local_music_playlists"] = playlists
+        save_settings(self.assistant.settings)
+        self._refresh_local_music_panel()
+        self._append_chat("System", f"Saved playlist '{name}' with {len(selected)} tracks.")
+
+    def _selected_local_playlist_name(self) -> str:
+        if self.music_playlist_listbox is None or not self.music_playlist_listbox.curselection():
+            return ""
+        index = int(self.music_playlist_listbox.curselection()[0])
+        rows = getattr(self, "_music_playlist_rows", [])
+        return rows[index] if 0 <= index < len(rows) else ""
+
+    def _play_selected_local_playlist(self) -> None:
+        name = self._selected_local_playlist_name()
+        if not name:
+            self._append_chat("System", "Select a JARVIS Music playlist first.")
+            return
+        self._play_named_local_music(name)
+
+    def _play_named_local_music(self, query: str) -> tuple[bool, str]:
+        wanted = _normalized_music_label(query)
+        playlists = self._local_music_playlists()
+        exact_playlist = next((name for name in playlists if _normalized_music_label(name) == wanted), "")
+        if exact_playlist:
+            ok, detail = self._play_local_music_queue(playlists[exact_playlist])
+            return ok, f"Playing playlist '{exact_playlist}'." if ok else detail
+        library = self._local_music_library()
+        exact_song = next((path for path in library if _normalized_music_label(Path(path).stem) == wanted), "")
+        if not exact_song:
+            matches = [path for path in library if wanted and wanted in _normalized_music_label(Path(path).stem)]
+            exact_song = matches[0] if len(matches) == 1 else ""
+        if exact_song:
+            index = library.index(exact_song)
+            ok, detail = self._play_local_music_queue(library, start_index=index)
+            return ok, f"Playing '{Path(exact_song).stem}' in JARVIS Music." if ok else detail
+        return False, f"I could not find one unambiguous song or playlist named '{query}' in JARVIS Music."
+
+    def _delete_selected_local_playlist(self) -> None:
+        name = self._selected_local_playlist_name()
+        if not name:
+            return
+        if not messagebox.askyesno("Delete Playlist", f"Delete playlist '{name}'? The audio files will not be deleted.", parent=self):
+            return
+        playlists = self._local_music_playlists()
+        playlists.pop(name, None)
+        self.assistant.settings["local_music_playlists"] = playlists
+        if self.assistant.settings.get("local_music_startup_type") == "playlist" and self.assistant.settings.get("local_music_startup_value") == name:
+            self.assistant.settings["local_music_startup_type"] = "off"
+            self.assistant.settings["local_music_startup_value"] = ""
+            self.assistant.settings["local_music_startup_enabled"] = False
+        save_settings(self.assistant.settings)
+        self._refresh_local_music_panel()
+
+    def _remove_selected_local_music(self) -> None:
+        selected = set(self._selected_local_music_paths())
+        if not selected:
+            return
+        library = [path for path in self._local_music_library() if path not in selected]
+        playlists = {name: [path for path in tracks if path not in selected] for name, tracks in self._local_music_playlists().items()}
+        self.assistant.settings["local_music_library"] = library
+        self.assistant.settings["local_music_playlists"] = playlists
+        if self.assistant.settings.get("local_music_startup_type") == "song" and self.assistant.settings.get("local_music_startup_value") in selected:
+            self.assistant.settings["local_music_startup_type"] = "off"
+            self.assistant.settings["local_music_startup_value"] = ""
+            self.assistant.settings["local_music_startup_enabled"] = False
+        save_settings(self.assistant.settings)
+        self._refresh_local_music_panel()
+        self._append_chat("System", f"Removed {len(selected)} song{'s' if len(selected) != 1 else ''} from JARVIS Music. The files were not deleted.")
+
+    def _set_local_music_startup_choice(self, label: str) -> None:
+        choice_type, value = self.music_startup_lookup.get(label, ("off", ""))
+        self.assistant.settings["local_music_startup_type"] = choice_type
+        self.assistant.settings["local_music_startup_value"] = value
+        self.assistant.settings["local_music_startup_enabled"] = choice_type != "off"
+        save_settings(self.assistant.settings)
+        self.local_music_state_var.set("Startup autoplay off" if choice_type == "off" else f"Startup autoplay: {label}")
+
+    def _start_local_music_autoplay(self) -> None:
+        if not self.assistant.settings.get("local_music_startup_enabled", False):
+            return
+        choice_type = str(self.assistant.settings.get("local_music_startup_type", "off"))
+        value = str(self.assistant.settings.get("local_music_startup_value", ""))
+        if choice_type == "song":
+            self._play_local_music_queue([value])
+        elif choice_type == "playlist":
+            tracks = self._local_music_playlists().get(value, [])
+            self._play_local_music_queue(tracks)
+
+    def _set_local_music_volume(self, value: float) -> None:
+        volume = max(0.0, min(1.0, float(value)))
+        self.local_music_player.set_volume(volume)
+        self.assistant.settings["local_music_volume"] = round(volume, 2)
+        if self._music_volume_save_after is not None:
+            self.after_cancel(self._music_volume_save_after)
+        self._music_volume_save_after = self.after(350, self._save_local_music_volume)
+
+    def _save_local_music_volume(self) -> None:
+        self._music_volume_save_after = None
+        save_settings(self.assistant.settings)
+
+    def _local_music_toggle_pause(self) -> None:
+        ok, state = self.local_music_player.toggle_pause()
+        self.local_music_state_var.set(state)
+        if not ok:
+            self._append_chat("System", state)
+
+    def _local_music_next(self) -> None:
+        ok, detail = self.local_music_player.next()
+        if ok:
+            self.local_music_now_var.set(detail)
+            self.local_music_state_var.set(f"Playing {self.local_music_player.index + 1} of {len(self.local_music_player.queue)}")
+            self.music_var.set(f"JARVIS Music: {detail}")
+        else:
+            self.local_music_state_var.set(detail)
+
+    def _local_music_previous(self) -> None:
+        ok, detail = self.local_music_player.previous()
+        if ok:
+            self.local_music_now_var.set(detail)
+            self.local_music_state_var.set(f"Playing {self.local_music_player.index + 1} of {len(self.local_music_player.queue)}")
+            self.music_var.set(f"JARVIS Music: {detail}")
+        else:
+            self.local_music_state_var.set(detail)
+
+    def _local_music_stop(self) -> None:
+        self.local_music_player.stop()
+        self.local_music_state_var.set("Stopped")
+        self.music_var.set(self._music_status())
+
+    def _poll_local_music_player(self) -> None:
+        if self.local_music_player.should_advance():
+            self._local_music_next()
+        self.after(700, self._poll_local_music_player)
 
     def open_music_window(self) -> None:
         window = ctk.CTkToplevel(self)
@@ -11578,6 +12090,10 @@ document.getElementById('player').appendChild(frame);}
         self.after(1500, self._schedule_status_updates)
 
     def _music_status(self) -> str:
+        player = getattr(self, "local_music_player", None)
+        if player is not None and player.current_path:
+            state = "Paused" if player.paused else "Playing"
+            return f"JARVIS Music {state}: {Path(player.current_path).stem}"
         apps = detect_music_apps()
         detected = [name.replace("_", " ").title() for name, present in apps.items() if present]
         return ", ".join(detected) if detected else "Browser fallback"
@@ -11609,6 +12125,49 @@ document.getElementById('player').appendChild(frame);}
             permission_request = "Ask for approval"
         if permission_request and any(term in lowered for term in ["permission", "access", "approval", "mode", "set", "use", "switch"]):
             self._set_permission_mode(permission_request)
+            return True
+        local_player_request = re.search(
+            r"\b(?:play|start)\s+(.+?)\s+(?:in|on|with|through)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b",
+            text,
+            re.I,
+        )
+        if local_player_request:
+            query = re.sub(r"^(?:my\s+)?playlist\s+", "", local_player_request.group(1).strip(), flags=re.I)
+            ok, message = self._play_named_local_music(query)
+            self.open_local_music_player_panel()
+            self._append_chat("JARVIS" if ok else "System", message)
+            if source == "overlay":
+                self._set_overlay_response(f"JARVIS: {message}")
+            return True
+        if re.search(r"\b(?:open|show|launch|bring up)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b", lowered):
+            self.open_local_music_player_panel()
+            message = "JARVIS Music is ready. Your library, playlists, and startup selection are all in one panel."
+            self._append_chat("JARVIS", message)
+            if source == "overlay":
+                self._set_overlay_response(f"JARVIS: {message}")
+            return True
+        local_control = re.search(r"\b(pause|resume|play|stop|next|previous|back)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b", lowered)
+        if local_control:
+            action = local_control.group(1)
+            if action in {"pause", "resume", "play"}:
+                if not self.local_music_player.current_path:
+                    self._local_music_toggle_pause()
+                elif action == "pause" and not self.local_music_player.paused:
+                    self._local_music_toggle_pause()
+                elif action in {"resume", "play"} and self.local_music_player.paused:
+                    self._local_music_toggle_pause()
+                else:
+                    self.local_music_state_var.set("Paused" if self.local_music_player.paused else "Playing")
+            elif action == "stop":
+                self._local_music_stop()
+            elif action == "next":
+                self._local_music_next()
+            else:
+                self._local_music_previous()
+            message = f"JARVIS Music: {self.local_music_state_var.get()}."
+            self._append_chat("JARVIS", message)
+            if source == "overlay":
+                self._set_overlay_response(f"JARVIS: {message}")
             return True
         if re.search(r"\b(?:open|show|launch|start)\s+(?:apple\s+)?health\s+(?:bridge|setup|panel)\b", lowered) or re.search(r"\b(?:health|watch)\s+setup\b", lowered):
             self.open_health_bridge_window()
@@ -12357,6 +12916,7 @@ document.getElementById('player').appendChild(frame);}
             self.phone_bridge.stop()
             self.phone_bridge = None
         self._stop_browser_engine()
+        self.local_music_player.shutdown()
         self.stop_speaking(silent=True)
         self._gesture_stop.set()
         if self._gesture_capture is not None:
@@ -12389,8 +12949,26 @@ def run_packaged_hand_tracking_self_test() -> bool:
             landmarker.close()
 
 
+def run_packaged_local_music_self_test() -> bool:
+    if pygame is None:
+        return False
+    previous_driver = os.environ.get("SDL_AUDIODRIVER")
+    os.environ["SDL_AUDIODRIVER"] = "dummy"
+    player = LocalMusicPlayer()
+    try:
+        return player._ensure_initialized()
+    finally:
+        player.shutdown()
+        if previous_driver is None:
+            os.environ.pop("SDL_AUDIODRIVER", None)
+        else:
+            os.environ["SDL_AUDIODRIVER"] = previous_driver
+
+
 if __name__ == "__main__":
     if "--self-test-hand-tracking" in sys.argv:
         raise SystemExit(0 if run_packaged_hand_tracking_self_test() else 1)
+    if "--self-test-local-music" in sys.argv:
+        raise SystemExit(0 if run_packaged_local_music_self_test() else 1)
     app = JarvisApp()
     app.mainloop()

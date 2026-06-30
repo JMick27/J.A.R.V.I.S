@@ -338,6 +338,14 @@ Run the Shortcut after JARVIS queues a mobile request. Keep your iPhone and PC o
 - `Can you open Apple Music and search my song?` then reply with the song name.
 - `Open Apple Music and search for Bad by Michael Jackson`
 - `Play Jackson's playlist on Apple Music` opens a matching playlist from your library and verifies playback before claiming success.
+- `Open JARVIS Music Player` opens the built-in local music panel.
+- `Play Road Trip in JARVIS Music Player` plays one unambiguous saved song or playlist.
+
+### JARVIS Music Player
+
+The built-in player handles local MP3, WAV, OGG, FLAC, M4A, and AAC files without opening another music app. Open the panel, use **Add Songs** or **Add Folder**, select tracks to create named playlists, and use the **Startup** tab to choose one song or playlist to play automatically when JARVIS opens. Startup autoplay is off until you explicitly select something.
+
+Removing a song from JARVIS Music or deleting a JARVIS playlist never deletes the original audio files.
 - `Play Master of Puppets by Metallica`
 - `Play Master of Puppets on my phone`
 - `Phone bridge setup`

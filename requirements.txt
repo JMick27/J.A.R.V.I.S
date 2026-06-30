@@ -14,3 +14,4 @@ numpy>=2.1.0
 mss>=9.0.2
 opencv-contrib-python>=4.13.0.92
 mediapipe>=0.10.35
+pygame-ce>=2.5.7
