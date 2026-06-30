@@ -9,7 +9,7 @@ import spotify_sync
 class _FakeCrypt:
     @staticmethod
     def CryptProtectData(data, *_args):
-        return None, b"protected:" + data
+        return b"protected:" + data
 
     @staticmethod
     def CryptUnprotectData(data, *_args):
@@ -32,6 +32,17 @@ class SpotifySyncTests(unittest.TestCase):
             self.assertEqual(store.load()["access_token"], "private-token")
             store.clear()
             self.assertFalse(path.exists())
+
+    def test_token_store_accepts_legacy_protect_tuple(self) -> None:
+        class LegacyCrypt(_FakeCrypt):
+            @staticmethod
+            def CryptProtectData(data, *_args):
+                return "description", b"protected:" + data
+
+        with tempfile.TemporaryDirectory() as temp, patch.object(spotify_sync, "win32crypt", LegacyCrypt):
+            store = spotify_sync.SpotifyTokenStore(Path(temp) / "token.dat")
+            store.save({"access_token": "token"})
+            self.assertEqual(store.load()["access_token"], "token")
 
     def test_sync_normalizes_playlists_and_saved_tracks(self) -> None:
         client = spotify_sync.SpotifyLibraryClient("client", Path("unused-token.dat"))

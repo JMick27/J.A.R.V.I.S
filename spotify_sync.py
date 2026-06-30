@@ -43,7 +43,10 @@ class SpotifyTokenStore:
             raise SpotifySyncError("Windows token encryption is unavailable.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         raw = json.dumps(token).encode("utf-8")
-        encrypted = win32crypt.CryptProtectData(raw, "JARVIS Spotify", None, None, None, 0)[1]
+        protected = win32crypt.CryptProtectData(raw, "JARVIS Spotify", None, None, None, 0)
+        encrypted = protected[1] if isinstance(protected, tuple) else protected
+        if not isinstance(encrypted, bytes):
+            raise SpotifySyncError("Windows returned an unsupported encrypted-token format.")
         self.path.write_bytes(base64.b64encode(encrypted))
 
     def load(self) -> dict[str, Any] | None:
@@ -51,7 +54,10 @@ class SpotifyTokenStore:
             return None
         try:
             encrypted = base64.b64decode(self.path.read_bytes())
-            raw = win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)[1]
+            unprotected = win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)
+            raw = unprotected[1] if isinstance(unprotected, tuple) else unprotected
+            if not isinstance(raw, bytes):
+                return None
             data = json.loads(raw.decode("utf-8"))
             return data if isinstance(data, dict) else None
         except Exception:
