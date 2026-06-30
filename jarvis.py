@@ -56,6 +56,7 @@ from openai import OpenAI
 
 from health_bridge import HealthBridgeServer, HealthStore, load_or_create_pairing_token, normalize_health_payload
 from phone_bridge import PhoneActionQueue, PhoneBridgeServer, load_or_create_phone_token
+from spotify_sync import SpotifyLibraryClient, SpotifySyncError
 
 try:
     import sounddevice as sd
@@ -124,7 +125,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -170,6 +171,7 @@ HEALTH_DATA_PATH = DATA_DIR / "health_readings.json"
 HEALTH_TOKEN_PATH = DATA_DIR / "health_bridge_token.txt"
 PHONE_QUEUE_PATH = DATA_DIR / "phone_actions.json"
 PHONE_TOKEN_PATH = DATA_DIR / "phone_bridge_token.txt"
+SPOTIFY_TOKEN_PATH = DATA_DIR / "spotify_token.dat"
 
 Desktop = None
 win_keyboard = None
@@ -330,6 +332,9 @@ DEFAULT_SETTINGS = {
     "local_music_startup_enabled": False,
     "local_music_startup_type": "off",
     "local_music_startup_value": "",
+    "spotify_client_id": "",
+    "spotify_redirect_port": 8767,
+    "spotify_library_cache": {},
     "wake_phrase": "jarvis",
     "theme": "dark",
     "ai_provider": "gemini",
@@ -6355,6 +6360,10 @@ class JarvisApp(ctk.CTk):
         self.music_library_listbox: tk.Listbox | None = None
         self.music_playlist_listbox: tk.Listbox | None = None
         self.music_startup_menu: ctk.CTkOptionMenu | None = None
+        self.spotify_library_listbox: tk.Listbox | None = None
+        self.spotify_client_id_entry: ctk.CTkEntry | None = None
+        self.spotify_status_var = ctk.StringVar(value="Spotify not connected")
+        self._spotify_rows: list[dict[str, str]] = []
         self.music_startup_lookup: dict[str, tuple[str, str]] = {"Off": ("off", "")}
         self.local_music_player = LocalMusicPlayer(float(self.assistant.settings.get("local_music_volume", 0.72)))
         self.local_music_now_var = ctk.StringVar(value="Nothing playing")
@@ -7324,8 +7333,9 @@ class JarvisApp(ctk.CTk):
         music_tabs.grid(row=3, column=0, sticky="nsew", padx=10, pady=(4, 10))
         library_tab = music_tabs.add("Library")
         playlists_tab = music_tabs.add("Playlists")
+        spotify_tab = music_tabs.add("Spotify")
         settings_tab = music_tabs.add("Startup")
-        for tab in (library_tab, playlists_tab, settings_tab):
+        for tab in (library_tab, playlists_tab, spotify_tab, settings_tab):
             tab.grid_columnconfigure(0, weight=1)
             tab.grid_rowconfigure(1, weight=1)
 
@@ -7361,6 +7371,29 @@ class JarvisApp(ctk.CTk):
         self.music_playlist_listbox.grid(row=0, column=0, sticky="nsew")
         playlist_scrollbar.grid(row=0, column=1, sticky="ns")
         self.music_playlist_listbox.bind("<Double-Button-1>", lambda _event: self._play_selected_local_playlist())
+
+        spotify_controls = ctk.CTkFrame(spotify_tab, fg_color="transparent")
+        spotify_controls.grid(row=0, column=0, sticky="ew", pady=(6, 5))
+        spotify_controls.grid_columnconfigure(0, weight=1)
+        self.spotify_client_id_entry = ctk.CTkEntry(spotify_controls, placeholder_text="Spotify Client ID")
+        self.spotify_client_id_entry.grid(row=0, column=0, sticky="ew", padx=(4, 5))
+        saved_spotify_client_id = str(self.assistant.settings.get("spotify_client_id", "") or os.getenv("SPOTIFY_CLIENT_ID", ""))
+        if saved_spotify_client_id:
+            self.spotify_client_id_entry.insert(0, saved_spotify_client_id)
+        ctk.CTkButton(spotify_controls, text="Connect", width=78, command=self._connect_spotify_library).grid(row=0, column=1, padx=4)
+        ctk.CTkButton(spotify_controls, text="Sync", width=64, command=self._sync_spotify_library).grid(row=0, column=2, padx=4)
+        ctk.CTkButton(spotify_controls, text="Disconnect", width=88, fg_color="#49303a", hover_color="#6a3d4b", command=self._disconnect_spotify_library).grid(row=0, column=3, padx=4)
+        spotify_list_frame = tk.Frame(spotify_tab, bg="#06101c", highlightthickness=1, highlightbackground="#123f5a")
+        spotify_list_frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
+        spotify_list_frame.grid_columnconfigure(0, weight=1)
+        spotify_list_frame.grid_rowconfigure(0, weight=1)
+        self.spotify_library_listbox = tk.Listbox(spotify_list_frame, bg="#06101c", fg="#e6fbff", selectbackground="#17627f", selectforeground="#ffffff", relief="flat", highlightthickness=0, font=("Segoe UI", 11), activestyle="none")
+        spotify_scrollbar = tk.Scrollbar(spotify_list_frame, orient="vertical", command=self.spotify_library_listbox.yview)
+        self.spotify_library_listbox.configure(yscrollcommand=spotify_scrollbar.set)
+        self.spotify_library_listbox.grid(row=0, column=0, sticky="nsew")
+        spotify_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.spotify_library_listbox.bind("<Double-Button-1>", lambda _event: self._play_selected_spotify_item())
+        ctk.CTkLabel(spotify_tab, textvariable=self.spotify_status_var, text_color=UI_MUTED, anchor="w").grid(row=2, column=0, sticky="ew", padx=6, pady=(2, 6))
 
         ctk.CTkLabel(settings_tab, text="AUTOPLAY WHEN JARVIS OPENS", text_color=UI_CYAN, font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, sticky="ew", padx=12, pady=(18, 5))
         self.music_startup_menu = ctk.CTkOptionMenu(settings_tab, values=["Off"], variable=self.local_music_startup_var, command=self._set_local_music_startup_choice, fg_color=UI_CARD, button_color=UI_BORDER, button_hover_color="#2898c5")
@@ -10531,6 +10564,7 @@ document.getElementById('player').appendChild(frame);}
                 count = len(playlists.get(name, []))
                 self.music_playlist_listbox.insert(tk.END, f"{name}    ({count} track{'s' if count != 1 else ''})")
         self._refresh_local_music_startup_choices(library, playlists)
+        self._render_spotify_library_cache()
 
     def _refresh_local_music_startup_choices(self, library: list[str], playlists: dict[str, list[str]]) -> None:
         lookup: dict[str, tuple[str, str]] = {"Off": ("off", "")}
@@ -10749,6 +10783,130 @@ document.getElementById('player').appendChild(frame);}
         if self.local_music_player.should_advance():
             self._local_music_next()
         self.after(700, self._poll_local_music_player)
+
+    def _spotify_client(self) -> SpotifyLibraryClient:
+        entry_value = self.spotify_client_id_entry.get().strip() if self.spotify_client_id_entry is not None else ""
+        client_id = entry_value or str(self.assistant.settings.get("spotify_client_id", "")) or os.getenv("SPOTIFY_CLIENT_ID", "")
+        return SpotifyLibraryClient(client_id, SPOTIFY_TOKEN_PATH, int(self.assistant.settings.get("spotify_redirect_port", 8767)))
+
+    def _connect_spotify_library(self) -> None:
+        client = self._spotify_client()
+        if not client.client_id:
+            messagebox.showerror("Spotify Setup", "Paste your Spotify Client ID first.", parent=self)
+            return
+        self.assistant.settings["spotify_client_id"] = client.client_id
+        save_settings(self.assistant.settings)
+        self.spotify_status_var.set("Waiting for Spotify authorization in your browser...")
+        self._set_command_status("Connecting Spotify...")
+
+        def worker() -> None:
+            try:
+                client.connect()
+                cache = client.sync()
+                self.after(0, lambda: self._finish_spotify_sync(cache, "Spotify connected and synced."))
+            except Exception as exc:
+                self.after(0, lambda error=str(exc): self._spotify_sync_failed(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _sync_spotify_library(self) -> None:
+        client = self._spotify_client()
+        if not client.client_id:
+            messagebox.showerror("Spotify Setup", "Paste your Spotify Client ID first.", parent=self)
+            return
+        self.assistant.settings["spotify_client_id"] = client.client_id
+        save_settings(self.assistant.settings)
+        self.spotify_status_var.set("Syncing Spotify library...")
+        self._set_command_status("Syncing Spotify library...")
+
+        def worker() -> None:
+            try:
+                cache = client.sync()
+                self.after(0, lambda: self._finish_spotify_sync(cache, "Spotify library synced."))
+            except Exception as exc:
+                self.after(0, lambda error=str(exc): self._spotify_sync_failed(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_spotify_sync(self, cache: dict[str, Any], message: str) -> None:
+        self.assistant.settings["spotify_library_cache"] = cache
+        save_settings(self.assistant.settings)
+        self._render_spotify_library_cache()
+        profile = cache.get("profile", {})
+        count = len(cache.get("playlists", [])) + len(cache.get("tracks", []))
+        final_message = f"{message} {count} items available for {profile.get('name', 'your account')}."
+        self.spotify_status_var.set(final_message)
+        self._set_command_status(final_message)
+        self._append_chat("JARVIS", final_message)
+
+    def _spotify_sync_failed(self, error: str) -> None:
+        message = f"Spotify sync failed: {error}"
+        self.spotify_status_var.set(message)
+        self._set_command_status("Spotify sync failed")
+        self._append_chat("System", message)
+
+    def _disconnect_spotify_library(self) -> None:
+        if not messagebox.askyesno("Disconnect Spotify", "Remove this Windows user's encrypted Spotify connection from JARVIS?", parent=self):
+            return
+        try:
+            self._spotify_client().disconnect()
+        except Exception:
+            pass
+        self.assistant.settings["spotify_library_cache"] = {}
+        save_settings(self.assistant.settings)
+        self._render_spotify_library_cache()
+        self.spotify_status_var.set("Spotify disconnected")
+
+    def _render_spotify_library_cache(self) -> None:
+        cache = self.assistant.settings.get("spotify_library_cache", {})
+        if not isinstance(cache, dict):
+            cache = {}
+        rows: list[dict[str, str]] = []
+        for playlist in cache.get("playlists", []):
+            if isinstance(playlist, dict) and playlist.get("uri"):
+                rows.append({"kind": "Playlist", "name": str(playlist.get("name", "Untitled")), "detail": f"{playlist.get('tracks', 0)} tracks", "uri": str(playlist.get("uri")), "url": str(playlist.get("url", ""))})
+        for track in cache.get("tracks", []):
+            if isinstance(track, dict) and track.get("uri"):
+                rows.append({"kind": "Song", "name": str(track.get("name", "Unknown")), "detail": str(track.get("artist", "")), "uri": str(track.get("uri")), "url": str(track.get("url", ""))})
+        self._spotify_rows = rows
+        if self.spotify_library_listbox is not None:
+            self.spotify_library_listbox.delete(0, tk.END)
+            for row in rows:
+                self.spotify_library_listbox.insert(tk.END, f"[{row['kind']}] {row['name']}    {row['detail']}")
+        profile = cache.get("profile", {})
+        if rows:
+            self.spotify_status_var.set(f"{profile.get('name', 'Spotify')}: {len(rows)} synced items | {cache.get('synced_at', '')}")
+        elif SPOTIFY_TOKEN_PATH.exists():
+            self.spotify_status_var.set("Spotify connected. Select Sync to refresh the library.")
+        else:
+            self.spotify_status_var.set("Spotify not connected")
+
+    def _play_selected_spotify_item(self) -> None:
+        if self.spotify_library_listbox is None or not self.spotify_library_listbox.curselection():
+            self._append_chat("System", "Select a synced Spotify song or playlist first.")
+            return
+        index = int(self.spotify_library_listbox.curselection()[0])
+        if not 0 <= index < len(self._spotify_rows):
+            return
+        row = self._spotify_rows[index]
+        target = row.get("uri") or row.get("url")
+        if not target:
+            return
+        webbrowser.open(target)
+        self.music_var.set(f"Spotify: {row['name']}")
+        self.spotify_status_var.set(f"Opened {row['kind'].lower()}: {row['name']}")
+        self._append_chat("JARVIS", f"Opening {row['name']} in Spotify. Direct and refreshingly unambiguous.")
+
+    def _play_synced_spotify_item(self, query: str) -> tuple[bool, str]:
+        wanted = _normalized_music_label(query)
+        exact = [row for row in self._spotify_rows if _normalized_music_label(row.get("name", "")) == wanted]
+        matches = exact or [row for row in self._spotify_rows if wanted and wanted in _normalized_music_label(row.get("name", ""))]
+        if len(matches) != 1:
+            return False, f"I found {len(matches)} synced Spotify matches for '{query}'. Open JARVIS Music to choose one."
+        row = matches[0]
+        webbrowser.open(row.get("uri") or row.get("url"))
+        self.music_var.set(f"Spotify: {row['name']}")
+        return True, f"Opening synced {row['kind'].lower()} '{row['name']}' in Spotify."
 
     def open_music_window(self) -> None:
         window = ctk.CTkToplevel(self)
@@ -12125,6 +12283,25 @@ document.getElementById('player').appendChild(frame);}
             permission_request = "Ask for approval"
         if permission_request and any(term in lowered for term in ["permission", "access", "approval", "mode", "set", "use", "switch"]):
             self._set_permission_mode(permission_request)
+            return True
+        if re.search(r"\b(?:connect|link|set up)\s+(?:my\s+)?spotify(?:\s+library|\s+account)?\b", lowered):
+            self.open_local_music_player_panel()
+            self._connect_spotify_library()
+            return True
+        if re.search(r"\b(?:sync|refresh|update|import)\s+(?:my\s+)?spotify\s+library\b", lowered):
+            self.open_local_music_player_panel()
+            self._sync_spotify_library()
+            return True
+        spotify_library_request = re.search(
+            r"\b(?:play|open|start)\s+(.+?)\s+(?:from|in)\s+(?:my\s+)?(?:synced\s+)?spotify\s+library\b",
+            text,
+            re.I,
+        )
+        if spotify_library_request:
+            ok, message = self._play_synced_spotify_item(spotify_library_request.group(1).strip())
+            self._append_chat("JARVIS" if ok else "System", message)
+            if source == "overlay":
+                self._set_overlay_response(f"JARVIS: {message}")
             return True
         local_player_request = re.search(
             r"\b(?:play|start)\s+(.+?)\s+(?:in|on|with|through)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b",

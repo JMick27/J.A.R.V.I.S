@@ -346,6 +346,20 @@ Run the Shortcut after JARVIS queues a mobile request. Keep your iPhone and PC o
 The built-in player handles local MP3, WAV, OGG, FLAC, M4A, and AAC files without opening another music app. Open the panel, use **Add Songs** or **Add Folder**, select tracks to create named playlists, and use the **Startup** tab to choose one song or playlist to play automatically when JARVIS opens. Startup autoplay is off until you explicitly select something.
 
 Removing a song from JARVIS Music or deleting a JARVIS playlist never deletes the original audio files.
+
+### Spotify Library Sync
+
+JARVIS can sync Spotify playlists and saved tracks, then open an exact synced item in Spotify without guessing at search results.
+
+1. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
+2. Add this redirect URI exactly: `http://127.0.0.1:8767/callback`
+3. Copy the app's Client ID. A client secret is not used or needed.
+4. Open **JARVIS Music -> Spotify**, paste the Client ID, and select **Connect**.
+5. Approve read-only playlist and saved-track access in the browser.
+
+The OAuth token is encrypted for the current Windows account using Windows DPAPI and is not stored in `settings.json`. You can set `SPOTIFY_CLIENT_ID` in `.env` instead of pasting it. Commands include `sync my Spotify library` and `play Road Trip from my Spotify library`.
+
+Spotify streams remain in Spotify; JARVIS does not download or copy them into the local-file player. Apple Music library sync requires Apple's MusicKit developer-token system and subscriber authorization, so the Windows build continues using its existing Apple Music automation unless those credentials are configured in a future integration.
 - `Play Master of Puppets by Metallica`
 - `Play Master of Puppets on my phone`
 - `Phone bridge setup`
