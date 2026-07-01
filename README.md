@@ -108,7 +108,7 @@ For desktop shortcuts, point the shortcut at `Launch ATLAS.vbs` in the project r
 - Toggle **Wake** for optional wake-phrase listening; it remains off until you enable it.
 - Click **Overlay** or press Ctrl + Alt + J to summon a small always-on-top command bar while using other windows.
 - Click **Watcher** to add project folders ATLAS should monitor for errors.
-- Click **Code** in the top bar or type `open coding workspace` to browse, search, preview, and ask Gemini about source files in a selected project.
+- Click **Code** in the top bar or type `open coding workspace` to launch the A.T.L.A.S Coding Engine.
 - Click **Music** to tune preferred music app, Apple Music automation, vision-assisted play clicks, and fallbacks.
 - Click **Music -> Phone Bridge** or type `phone bridge setup` to let an iPhone Shortcut fetch approved mobile actions, such as playing Apple Music on your phone.
 - Click **Integrations** to enable free integrations, check setup status, and open setup docs.
@@ -125,13 +125,17 @@ For desktop shortcuts, point the shortcut at `Launch ATLAS.vbs` in the project r
 
 The main UI uses a Command Center layout with a central animated core, telemetry cards, a chat feed, and a controls/status panel. The `Core`, `Chat`, and `Status` panels have small drag handles, so you can click and drag them around inside the same ATLAS window. Each panel also has a bottom-right resize grip for mouse scaling. Panel positions and sizes are saved in `settings.json`, and the **Panels** manager can reset the layout or restore hidden sections.
 
-## Coding Workspace
+## A.T.L.A.S Coding Engine
 
-Open the code helper with the **Code** button, choose a project folder, and select a source file to preview it. The search box checks both relative file paths and sampled source contents while skipping dependency, cache, backup, build, and version-control folders.
+Open the coding engine with the **Code** button. Its first screen lets you select a project folder, then changes into an in-panel project workspace. The file browser searches both relative paths and sampled source contents while skipping dependency, cache, backup, build, and version-control folders.
+
+The source editor can directly view and edit UTF-8 scripts. **New** creates a script, including a starter template for common Python, Godot, JavaScript/TypeScript, and C# files. **Save** creates a timestamped backup before replacing the file. **Delete** never permanently erases a script; it moves it into the project's `.atlas_trash` folder after confirmation.
+
+For Godot, Unity, and Unreal projects, the status bar detects the project type and whether its editor is open. **Engine** focuses the running editor when possible or safely launches the selected project. Detected project settings files appear in the settings menu and can be opened in the same editor, changed, reviewed, and saved with backups.
 
 Enter a question such as `What does this class do?` or `Where could this fail?` and press **Explain**. ATLAS sends the selected file and question to Gemini, then places the explanation in the main chat. The selected workspace is saved, but source contents and code questions are not stored as chat history.
 
-Phase 2 adds controlled edits:
+AI-assisted edits remain controlled:
 
 1. Select a UTF-8 source file under 50,000 characters.
 2. Describe the change in the question box.
@@ -155,7 +159,7 @@ The **Approved runner** menu only shows fixed runners discovered from the projec
 
 Project tests can still read files located inside their own workspace, so only run projects you trust.
 
-The agent tool registry can now inspect the selected coding workspace, search source files, read approved source files, run diagnostics, and select an approved runner. `.env`, private-key, credential, and similar files are blocked from AI context, while secret-like assignments in readable source are redacted.
+The agent tool registry can inspect the selected workspace, search and read approved source files, create scripts, propose or write confirmed edits, move scripts to reversible trash, inspect or launch a supported engine, run diagnostics, and select an approved runner. `.env`, private-key, credential, and similar files are blocked from AI context, while secret-like assignments in readable source are redacted.
 
 Voice or text examples:
 
@@ -163,6 +167,8 @@ Voice or text examples:
 open coding workspace
 diagnose my project
 search my project for ToolRegistry
+create a script called scripts/player.gd
+open my project in the engine
 run the selected code check
 show the latest code backup
 apply the proposed code edit

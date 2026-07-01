@@ -57,6 +57,16 @@ from openai import OpenAI
 from health_bridge import HealthBridgeServer, HealthStore, load_or_create_pairing_token, normalize_health_payload
 from phone_bridge import PhoneActionQueue, PhoneBridgeServer, load_or_create_phone_token
 from spotify_sync import SpotifyLibraryClient, SpotifySyncError
+from atlas_coding import (
+    create_script as atlas_create_script,
+    delete_script as atlas_delete_script,
+    detect_project as atlas_detect_project,
+    focus_engine_window as atlas_focus_engine_window,
+    launch_project_engine as atlas_launch_project_engine,
+    project_path as atlas_project_path,
+    save_script as atlas_save_script,
+    suggested_script_template,
+)
 
 try:
     import sounddevice as sd
@@ -126,7 +136,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -1754,6 +1764,7 @@ CODING_FILE_EXTENSIONS = {
     ".json", ".md", ".toml", ".yaml", ".yml", ".xml", ".sql", ".sh", ".ps1",
     ".gd", ".cs", ".cpp", ".cc", ".c", ".h", ".hpp", ".java", ".kt", ".rs",
     ".go", ".rb", ".php", ".swift", ".vue", ".svelte", ".ini", ".cfg", ".env.example",
+    ".godot", ".uproject", ".asset",
 }
 
 CODING_SKIP_FOLDERS = {
@@ -3548,6 +3559,11 @@ class ToolRegistry:
         self._register("get_coding_workspace", "safe", "Describe the selected coding workspace and approved runners.", self._get_coding_workspace)
         self._register("search_code", "safe", "Search filenames and source contents in the selected coding workspace.", self._search_code)
         self._register("read_code_file", "safe", "Read a UTF-8 source file inside the selected coding workspace.", self._read_code_file)
+        self._register("create_code_file", "medium", "Create a source file inside the selected coding workspace.", self._create_code_file)
+        self._register("write_code_file", "high", "Replace a source file inside the selected coding workspace after confirmation.", self._write_code_file)
+        self._register("delete_code_file", "high", "Move a source file to the workspace trash after confirmation.", self._delete_code_file)
+        self._register("inspect_code_engine", "safe", "Detect the project engine, settings files, and whether its editor is running.", self._inspect_code_engine)
+        self._register("launch_code_engine", "medium", "Launch the selected project in its supported game engine.", self._launch_code_engine)
         self._register("diagnose_code_project", "safe", "Run local syntax and merge-conflict diagnostics on the coding workspace.", self._diagnose_code_project)
         self._register("run_code_check", "high", "Run one discovered, fixed, approved test or build check. Project code may execute.", self._run_code_check)
         self._register("list_folder", "safe", "List files in a folder.", self._list_folder)
@@ -3598,6 +3614,8 @@ class ToolRegistry:
             "delete_file",
             "empty_recycle_bin",
             "run_code_check",
+            "write_code_file",
+            "delete_code_file",
         }:
             return True
 
@@ -3828,6 +3846,65 @@ class ToolRegistry:
         if not ok:
             return text
         return f"FILE: {path.relative_to(root)}\n\n{redact_code_secrets(text)}"
+
+    def _create_code_file(self, args: dict[str, Any]) -> str:
+        root = self._coding_root()
+        if root is None:
+            return "No coding workspace is selected."
+        relative = str(args.get("path") or args.get("file") or "").strip().strip('"')
+        if not relative:
+            return "A workspace-relative file path is required."
+        content = str(args.get("content", ""))
+        try:
+            target = atlas_create_script(root, relative, content)
+        except Exception as exc:
+            return f"Code file was not created: {exc}"
+        return f"Created code file: {target.relative_to(root)}"
+
+    def _write_code_file(self, args: dict[str, Any]) -> str:
+        root = self._coding_root()
+        if root is None:
+            return "No coding workspace is selected."
+        relative = str(args.get("path") or args.get("file") or "").strip().strip('"')
+        if not relative or "content" not in args:
+            return "A workspace-relative path and complete file content are required."
+        try:
+            target = atlas_project_path(root, relative, must_exist=True)
+            expected = hashlib.sha256(target.read_bytes()).hexdigest()
+            _target, backup = atlas_save_script(root, relative, str(args["content"]), expected)
+        except Exception as exc:
+            return f"Code file was not changed: {exc}"
+        return f"Updated code file: {relative}. Backup: {backup.relative_to(root)}"
+
+    def _delete_code_file(self, args: dict[str, Any]) -> str:
+        root = self._coding_root()
+        if root is None:
+            return "No coding workspace is selected."
+        relative = str(args.get("path") or args.get("file") or "").strip().strip('"')
+        if not relative:
+            return "A workspace-relative file path is required."
+        try:
+            trash = atlas_delete_script(root, relative)
+        except Exception as exc:
+            return f"Code file was not removed: {exc}"
+        return f"Moved {relative} to reversible project trash: {trash.relative_to(root)}"
+
+    def _inspect_code_engine(self, _args: dict[str, Any]) -> str:
+        root = self._coding_root()
+        if root is None:
+            return "No coding workspace is selected."
+        details = atlas_detect_project(root)
+        settings = ", ".join(details["settings_files"]) or "none detected"
+        state = "running" if details["engine_running"] else "not running"
+        return f"Project: {details['type']}. Engine: {state}. Settings files: {settings}."
+
+    def _launch_code_engine(self, _args: dict[str, Any]) -> str:
+        root = self._coding_root()
+        if root is None:
+            return "No coding workspace is selected."
+        details = atlas_detect_project(root)
+        ok, message = atlas_launch_project_engine(root, str(details["type"]))
+        return message if ok else f"Engine launch failed: {message}"
 
     def _diagnose_code_project(self, _args: dict[str, Any]) -> str:
         root = self._coding_root()
@@ -4471,6 +4548,9 @@ class JarvisAssistant:
             "inspect the project", "diagnose my code", "diagnose the project",
             "read code file", "read the code file", "run code check", "run project tests",
             "run the tests", "what kind of project", "coding workspace status",
+            "create a script", "create script", "create a code file", "edit the script",
+            "edit my code", "change the script", "delete the script", "delete code file",
+            "open the engine", "launch the engine", "project settings", "coding engine",
         ]
         if any(term in lowered for term in coding_agent_terms):
             return True
@@ -6446,8 +6526,17 @@ class JarvisApp(ctk.CTk):
         self.side_panel_container: ctk.CTkFrame | None = None
         self.side_panel: ctk.CTkScrollableFrame | None = None
         self.code_panel: ctk.CTkFrame | None = None
+        self.code_home_frame: ctk.CTkFrame | None = None
+        self.code_workspace_frame: ctk.CTkFrame | None = None
         self.code_file_list: ctk.CTkScrollableFrame | None = None
         self.code_preview_box: ctk.CTkTextbox | None = None
+        self.code_editor_hash = ""
+        self.code_editor_dirty = False
+        self.code_file_label_var = ctk.StringVar(value="No file selected")
+        self.code_engine_var = ctk.StringVar(value="ENGINE: NOT DETECTED")
+        self.code_project_type_var = ctk.StringVar(value="PROJECT: NONE")
+        self.code_settings_menu: ctk.CTkOptionMenu | None = None
+        self.code_settings_var = ctk.StringVar(value="No settings file")
         self.code_question_entry: ctk.CTkEntry | None = None
         self.code_search_entry: ctk.CTkEntry | None = None
         self.code_runner_menu: ctk.CTkOptionMenu | None = None
@@ -7111,65 +7200,98 @@ class JarvisApp(ctk.CTk):
         code_panel = ctk.CTkFrame(workspace, fg_color=UI_PANEL_ALT, corner_radius=10, border_width=1, border_color=UI_BORDER_SOFT)
         self.code_panel = code_panel
         code_panel.grid_columnconfigure(0, weight=1)
-        code_panel.grid_rowconfigure(2, weight=1)
-        code_handle = self._panel_drag_handle(code_panel, "CODING WORKSPACE")
+        code_panel.grid_rowconfigure(1, weight=1)
+        code_handle = self._panel_drag_handle(code_panel, "A.T.L.A.S CODING ENGINE")
         code_handle.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
 
-        code_toolbar = ctk.CTkFrame(code_panel, fg_color="transparent")
-        code_toolbar.grid(row=1, column=0, sticky="ew", padx=10, pady=8)
-        code_toolbar.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(code_toolbar, textvariable=self.code_workspace_var, anchor="w", text_color=UI_TEXT).grid(row=0, column=0, sticky="ew", padx=(4, 8))
-        ctk.CTkButton(code_toolbar, text="Choose Project", width=112, command=self._choose_coding_workspace).grid(row=0, column=1, padx=4)
-        self.code_search_entry = ctk.CTkEntry(code_toolbar, placeholder_text="Search files or source...", width=190)
-        self.code_search_entry.grid(row=0, column=2, padx=4)
-        self.code_search_entry.bind("<Return>", lambda _event: self._refresh_coding_workspace_files())
-        ctk.CTkButton(code_toolbar, text="Search", width=74, command=self._refresh_coding_workspace_files).grid(row=0, column=3, padx=(4, 0))
-        ctk.CTkButton(code_toolbar, text="Diagnostics", width=92, command=self._run_coding_diagnostics).grid(row=0, column=4, padx=(6, 0))
-        ctk.CTkButton(
-            code_toolbar,
-            text="Hide Panel",
-            width=88,
-            fg_color=UI_CARD,
-            hover_color=UI_BORDER_SOFT,
-            command=lambda: self._set_command_center_panel_visible("code", False),
-        ).grid(row=0, column=5, padx=(6, 0))
-        runner_bar = ctk.CTkFrame(code_toolbar, fg_color="transparent")
-        runner_bar.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(8, 0))
-        runner_bar.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(runner_bar, text="Approved runner", text_color=UI_MUTED).grid(row=0, column=0, padx=(4, 8))
-        self.code_runner_menu = ctk.CTkOptionMenu(runner_bar, values=["No approved runner"], variable=self.code_runner_var, width=230)
-        self.code_runner_menu.grid(row=0, column=1, sticky="w")
-        ctk.CTkButton(runner_bar, text="Run", width=74, command=self._run_selected_code_runner).grid(row=0, column=2, padx=(8, 0))
+        self.code_home_frame = ctk.CTkFrame(code_panel, fg_color="transparent")
+        self.code_home_frame.grid(row=1, column=0, sticky="nsew", padx=14, pady=14)
+        self.code_home_frame.grid_columnconfigure(0, weight=1)
+        self.code_home_frame.grid_rowconfigure(0, weight=1)
+        home_core = ctk.CTkFrame(self.code_home_frame, fg_color=UI_PANEL_DEEP, corner_radius=8, border_width=1, border_color=UI_BORDER)
+        home_core.grid(row=0, column=0, sticky="nsew")
+        home_core.grid_columnconfigure(0, weight=1)
+        home_core.grid_rowconfigure(0, weight=1)
+        welcome = ctk.CTkFrame(home_core, fg_color="transparent")
+        welcome.grid(row=0, column=0)
+        ctk.CTkLabel(welcome, text="A.T.L.A.S", font=ctk.CTkFont(size=32, weight="bold"), text_color=UI_CYAN).grid(row=0, column=0, pady=(0, 2))
+        ctk.CTkLabel(welcome, text="CODING ENGINE", font=ctk.CTkFont(size=17, weight="bold"), text_color=UI_BLUE).grid(row=1, column=0)
+        ctk.CTkLabel(
+            welcome,
+            text="Select a project to inspect, edit, test, and manage it with controlled AI assistance.",
+            text_color=UI_MUTED,
+            wraplength=470,
+            justify="center",
+        ).grid(row=2, column=0, padx=24, pady=(16, 18))
+        ctk.CTkButton(welcome, text="SELECT PROJECT", width=180, height=38, command=self._choose_coding_workspace).grid(row=3, column=0)
 
-        code_body = ctk.CTkFrame(code_panel, fg_color="transparent")
-        code_body.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.code_workspace_frame = ctk.CTkFrame(code_panel, fg_color="transparent")
+        self.code_workspace_frame.grid_columnconfigure(0, weight=1)
+        self.code_workspace_frame.grid_rowconfigure(2, weight=1)
+        code_toolbar = ctk.CTkFrame(self.code_workspace_frame, fg_color="transparent")
+        code_toolbar.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 5))
+        code_toolbar.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(code_toolbar, textvariable=self.code_workspace_var, anchor="w", font=ctk.CTkFont(weight="bold"), text_color=UI_TEXT).grid(row=0, column=0, sticky="ew", padx=(4, 8))
+        ctk.CTkLabel(code_toolbar, textvariable=self.code_project_type_var, text_color=UI_CYAN).grid(row=0, column=1, padx=6)
+        ctk.CTkLabel(code_toolbar, textvariable=self.code_engine_var, text_color=UI_GREEN).grid(row=0, column=2, padx=6)
+        ctk.CTkButton(code_toolbar, text="Engine", width=70, command=self._open_or_focus_code_engine).grid(row=0, column=3, padx=3)
+        ctk.CTkButton(code_toolbar, text="Change", width=70, command=self._choose_coding_workspace).grid(row=0, column=4, padx=3)
+        ctk.CTkButton(code_toolbar, text="Hide", width=56, fg_color=UI_CARD, command=lambda: self._set_command_center_panel_visible("code", False)).grid(row=0, column=5, padx=(3, 0))
+
+        action_bar = ctk.CTkFrame(self.code_workspace_frame, fg_color=UI_PANEL_DEEP, corner_radius=7)
+        action_bar.grid(row=1, column=0, sticky="ew", padx=10, pady=4)
+        action_bar.grid_columnconfigure(5, weight=1)
+        ctk.CTkButton(action_bar, text="New", width=58, command=self._create_coding_file).grid(row=0, column=0, padx=(7, 3), pady=7)
+        ctk.CTkButton(action_bar, text="Save", width=58, command=self._save_coding_file).grid(row=0, column=1, padx=3)
+        ctk.CTkButton(action_bar, text="Delete", width=62, fg_color=UI_DANGER, hover_color="#a33a4b", command=self._delete_coding_file).grid(row=0, column=2, padx=3)
+        ctk.CTkButton(action_bar, text="Diagnostics", width=88, command=self._run_coding_diagnostics).grid(row=0, column=3, padx=3)
+        self.code_settings_menu = ctk.CTkOptionMenu(action_bar, values=["No settings file"], variable=self.code_settings_var, width=170)
+        self.code_settings_menu.grid(row=0, column=4, padx=(8, 3))
+        ctk.CTkButton(action_bar, text="Open Settings", width=98, command=self._open_selected_project_settings).grid(row=0, column=5, sticky="w", padx=3)
+        self.code_search_entry = ctk.CTkEntry(action_bar, placeholder_text="Search project...", width=180)
+        self.code_search_entry.grid(row=0, column=6, padx=3)
+        self.code_search_entry.bind("<Return>", lambda _event: self._refresh_coding_workspace_files())
+        ctk.CTkButton(action_bar, text="Search", width=62, command=self._refresh_coding_workspace_files).grid(row=0, column=7, padx=(3, 7))
+
+        code_body = ctk.CTkFrame(self.code_workspace_frame, fg_color="transparent")
+        code_body.grid(row=2, column=0, sticky="nsew", padx=10, pady=4)
         code_body.grid_columnconfigure(0, weight=0, minsize=210)
         code_body.grid_columnconfigure(1, weight=1)
         code_body.grid_rowconfigure(0, weight=1)
         self.code_file_list = ctk.CTkScrollableFrame(code_body, width=200, fg_color=UI_PANEL_DEEP, corner_radius=8)
         self.code_file_list.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         self.code_file_list.grid_columnconfigure(0, weight=1)
-
         code_editor = ctk.CTkFrame(code_body, fg_color=UI_PANEL_DEEP, corner_radius=8)
         code_editor.grid(row=0, column=1, sticky="nsew")
         code_editor.grid_columnconfigure(0, weight=1)
-        code_editor.grid_rowconfigure(0, weight=1)
-        self.code_preview_box = ctk.CTkTextbox(code_editor, wrap="none", font=ctk.CTkFont(family="Consolas", size=12), fg_color="#050b13", text_color=UI_TEXT)
-        self.code_preview_box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=8, pady=(8, 6))
-        self.code_preview_box.insert("1.0", "Choose a project, then select a source file. Proposed edits appear here as a reviewable diff.")
-        self.code_preview_box.configure(state="disabled")
-        self.code_question_entry = ctk.CTkEntry(code_editor, placeholder_text="Ask for an explanation or describe an edit...")
-        self.code_question_entry.grid(row=1, column=0, sticky="ew", padx=(8, 6), pady=(0, 8))
-        self.code_question_entry.bind("<Return>", lambda _event: self._explain_selected_code_file())
-        ctk.CTkButton(code_editor, text="Explain", width=82, command=self._explain_selected_code_file).grid(row=1, column=1, padx=(0, 8), pady=(0, 6))
-        edit_actions = ctk.CTkFrame(code_editor, fg_color="transparent")
-        edit_actions.grid(row=2, column=0, columnspan=2, sticky="e", padx=8, pady=(0, 8))
-        ctk.CTkButton(edit_actions, text="Propose Edit", width=100, command=self._propose_selected_code_edit).grid(row=0, column=0, padx=3, pady=3)
-        self.code_apply_button = ctk.CTkButton(edit_actions, text="Apply", width=72, state="disabled", command=self._apply_pending_code_edit)
-        self.code_apply_button.grid(row=0, column=1, padx=4)
-        self.code_discard_button = ctk.CTkButton(edit_actions, text="Discard", width=82, state="disabled", fg_color="#49303a", hover_color="#6a3d4b", command=self._discard_pending_code_edit)
-        self.code_discard_button.grid(row=1, column=0, padx=3, pady=3)
-        ctk.CTkButton(edit_actions, text="Latest Backup", width=118, fg_color="#21465b", hover_color="#2d6886", command=self._preview_latest_code_backup).grid(row=1, column=1, padx=4, pady=3)
+        code_editor.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(code_editor, textvariable=self.code_file_label_var, anchor="w", text_color=UI_CYAN, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 2))
+        self.code_preview_box = ctk.CTkTextbox(code_editor, wrap="none", undo=True, font=ctk.CTkFont(family="Consolas", size=12), fg_color="#050b13", text_color=UI_TEXT)
+        self.code_preview_box.grid(row=1, column=0, sticky="nsew", padx=8, pady=(2, 6))
+        self.code_preview_box.bind("<<Modified>>", self._mark_code_editor_modified)
+
+        code_ai_bar = ctk.CTkFrame(self.code_workspace_frame, fg_color="transparent")
+        code_ai_bar.grid(row=3, column=0, sticky="ew", padx=10, pady=(2, 5))
+        code_ai_bar.grid_columnconfigure(0, weight=1)
+        self.code_question_entry = ctk.CTkEntry(code_ai_bar, placeholder_text="Ask A.T.L.A.S to explain or change the selected file...")
+        self.code_question_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        self.code_question_entry.bind("<Return>", lambda _event: self._propose_selected_code_edit())
+        ctk.CTkButton(code_ai_bar, text="Explain", width=74, command=self._explain_selected_code_file).grid(row=0, column=1, padx=3)
+        ctk.CTkButton(code_ai_bar, text="Propose Edit", width=96, command=self._propose_selected_code_edit).grid(row=0, column=2, padx=3)
+        self.code_apply_button = ctk.CTkButton(code_ai_bar, text="Apply", width=60, state="disabled", command=self._apply_pending_code_edit)
+        self.code_apply_button.grid(row=0, column=3, padx=3)
+        self.code_discard_button = ctk.CTkButton(code_ai_bar, text="Discard", width=68, state="disabled", fg_color="#49303a", command=self._discard_pending_code_edit)
+        self.code_discard_button.grid(row=0, column=4, padx=(3, 0))
+
+        runner_bar = ctk.CTkFrame(self.code_workspace_frame, fg_color="transparent")
+        runner_bar.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 8))
+        runner_bar.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(runner_bar, text="Approved check", text_color=UI_MUTED).grid(row=0, column=0, padx=(3, 7))
+        self.code_runner_menu = ctk.CTkOptionMenu(runner_bar, values=["No approved runner"], variable=self.code_runner_var, width=240)
+        self.code_runner_menu.grid(row=0, column=1, sticky="w")
+        ctk.CTkButton(runner_bar, text="Run", width=60, command=self._run_selected_code_runner).grid(row=0, column=2, padx=3)
+        ctk.CTkButton(runner_bar, text="Latest Backup", width=104, fg_color="#21465b", command=self._preview_latest_code_backup).grid(row=0, column=3, padx=(3, 0))
+        self._show_coding_engine_home()
 
         news_panel = ctk.CTkFrame(workspace, fg_color=UI_PANEL_ALT, corner_radius=10, border_width=1, border_color=UI_BORDER_SOFT)
         self.news_panel = news_panel
@@ -7468,6 +7590,173 @@ class JarvisApp(ctk.CTk):
         value = str(self.assistant.settings.get("coding_workspace_folder", "")).strip()
         return normalize_watch_folder(value) if value else None
 
+    def _show_coding_engine_home(self) -> None:
+        root = self._coding_workspace_root()
+        if root is not None:
+            self._show_coding_workspace()
+            return
+        if self.code_workspace_frame is not None:
+            self.code_workspace_frame.grid_forget()
+        if self.code_home_frame is not None:
+            self.code_home_frame.grid(row=1, column=0, sticky="nsew", padx=14, pady=14)
+
+    def _show_coding_workspace(self) -> None:
+        if self.code_home_frame is not None:
+            self.code_home_frame.grid_forget()
+        if self.code_workspace_frame is not None:
+            self.code_workspace_frame.grid(row=1, column=0, sticky="nsew")
+        self._refresh_coding_engine_status()
+
+    def _refresh_coding_engine_status(self) -> None:
+        root = self._coding_workspace_root()
+        if root is None:
+            self.code_project_type_var.set("PROJECT: NONE")
+            self.code_engine_var.set("ENGINE: NOT DETECTED")
+            return
+        details = atlas_detect_project(root)
+        project_type = str(details["type"])
+        self.code_project_type_var.set(f"PROJECT: {project_type.upper()}")
+        if project_type in {"Godot", "Unity", "Unreal Engine"}:
+            self.code_engine_var.set("ENGINE: ONLINE" if details["engine_running"] else "ENGINE: OFFLINE")
+        else:
+            self.code_engine_var.set("ENGINE: NOT REQUIRED")
+        settings_files = [str(item) for item in details["settings_files"]]
+        values = settings_files or ["No settings file"]
+        if self.code_settings_menu is not None:
+            self.code_settings_menu.configure(values=values)
+        if self.code_settings_var.get() not in values:
+            self.code_settings_var.set(values[0])
+
+    def _open_or_focus_code_engine(self) -> None:
+        root = self._coding_workspace_root()
+        if root is None:
+            self._choose_coding_workspace()
+            return
+        details = atlas_detect_project(root)
+        project_type = str(details["type"])
+        if details["engine_running"] and atlas_focus_engine_window(project_type):
+            self._set_command_status(f"Focused {project_type}")
+            return
+        if self._permission_requires_confirmation("medium") and not messagebox.askyesno(
+            "Launch Project Engine",
+            f"Open {root.name} in {project_type}?",
+            parent=self,
+        ):
+            return
+        ok, message = atlas_launch_project_engine(root, project_type)
+        self._append_chat("ATLAS" if ok else "System", message)
+        self._set_command_status(message)
+        self.after(1800, self._refresh_coding_engine_status)
+
+    def _open_selected_project_settings(self) -> None:
+        root = self._coding_workspace_root()
+        relative = self.code_settings_var.get().strip()
+        if root is None or relative == "No settings file":
+            self._append_chat("System", "No supported project settings file was detected.")
+            return
+        try:
+            target = atlas_project_path(root, relative, must_exist=True)
+        except Exception as exc:
+            self._append_chat("System", f"Could not open project settings: {exc}")
+            return
+        self._select_coding_file(target)
+
+    def _mark_code_editor_modified(self, _event: Any | None = None) -> None:
+        if self.code_preview_box is None:
+            return
+        try:
+            modified = bool(self.code_preview_box.edit_modified())
+            self.code_preview_box.edit_modified(False)
+        except tk.TclError:
+            return
+        if modified and self.code_selected_path is not None and self.code_pending_edit is None:
+            self.code_editor_dirty = True
+            label = self.code_file_label_var.get().rstrip(" *")
+            self.code_file_label_var.set(f"{label} *")
+
+    def _create_coding_file(self) -> None:
+        root = self._coding_workspace_root()
+        if root is None:
+            self._choose_coding_workspace()
+            return
+        relative = simpledialog.askstring(
+            "Create Script",
+            "Project-relative path (example: scripts/player.gd):",
+            parent=self,
+        )
+        if not relative:
+            return
+        relative = relative.strip().replace("\\", "/")
+        details = atlas_detect_project(root)
+        template = suggested_script_template(str(details["type"]), relative)
+        try:
+            target = atlas_create_script(root, relative, template)
+        except Exception as exc:
+            messagebox.showerror("Create Script", str(exc), parent=self)
+            return
+        self.assistant.record_action("create_code_file", {"file": relative}, "medium", True, f"Created {relative}.", verified=True)
+        self._refresh_coding_workspace_files()
+        self._select_coding_file(target)
+        self._set_command_status(f"Created {relative}")
+
+    def _save_coding_file(self) -> bool:
+        root = self._coding_workspace_root()
+        selected = self.code_selected_path
+        if self.code_pending_edit is not None:
+            self._append_chat("System", "Apply or discard the proposed edit before using direct save.")
+            return False
+        if root is None or selected is None or self.code_preview_box is None:
+            self._append_chat("System", "Select a source file before saving.")
+            return False
+        relative = str(selected.relative_to(root))
+        content = self.code_preview_box.get("1.0", "end-1c")
+        if self._permission_requires_confirmation("medium") and not messagebox.askyesno(
+            "Save Code File",
+            f"Save changes to {relative}?\n\nA timestamped backup will be created first.",
+            parent=self,
+        ):
+            return False
+        try:
+            _target, backup = atlas_save_script(root, relative, content, self.code_editor_hash)
+        except Exception as exc:
+            messagebox.showerror("Save Code File", str(exc), parent=self)
+            return False
+        self.code_editor_hash = hashlib.sha256(selected.read_bytes()).hexdigest()
+        self.code_editor_dirty = False
+        self.code_file_label_var.set(relative)
+        self.assistant.record_action("edit_code_file", {"file": relative, "backup": str(backup)}, "medium", True, f"Saved {relative}.", verified=True)
+        self._set_command_status(f"Saved {relative}")
+        return True
+
+    def _delete_coding_file(self) -> None:
+        root = self._coding_workspace_root()
+        selected = self.code_selected_path
+        if root is None or selected is None:
+            self._append_chat("System", "Select a source file before deleting it.")
+            return
+        relative = str(selected.relative_to(root))
+        if not messagebox.askyesno(
+            "Remove Code File",
+            f"Move {relative} to this project's reversible A.T.L.A.S trash?\n\nThis will not permanently delete it.",
+            parent=self,
+        ):
+            return
+        try:
+            trash = atlas_delete_script(root, relative)
+        except Exception as exc:
+            messagebox.showerror("Remove Code File", str(exc), parent=self)
+            return
+        self.code_selected_path = None
+        self.code_editor_hash = ""
+        self.code_editor_dirty = False
+        self.code_file_label_var.set("No file selected")
+        if self.code_preview_box is not None:
+            self.code_preview_box.configure(state="normal")
+            self.code_preview_box.delete("1.0", "end")
+        self.assistant.record_action("delete_code_file", {"file": relative, "trash": str(trash)}, "high", True, f"Moved {relative} to project trash.", verified=True)
+        self._refresh_coding_workspace_files()
+        self._set_command_status(f"Moved {relative} to project trash")
+
     def _choose_coding_workspace(self) -> None:
         initial = str(self.assistant.settings.get("coding_workspace_folder", "")).strip()
         path = filedialog.askdirectory(title="Choose coding workspace", initialdir=initial if Path(initial).is_dir() else None)
@@ -7478,17 +7767,22 @@ class JarvisApp(ctk.CTk):
         self.code_workspace_var.set(f"Project: {root.name}")
         self.code_selected_path = None
         self.code_pending_edit = None
+        self.code_editor_hash = ""
+        self.code_editor_dirty = False
         self._set_code_edit_buttons(False)
         save_settings(self.assistant.settings)
+        self._show_coding_workspace()
         self._set_command_status(f"Coding workspace: {root.name}")
-        self._append_chat("System", f"Coding workspace selected: {root}. Read-only analysis is ready.")
+        self._append_chat("ATLAS", f"Coding workspace selected: {root}. Editing, diagnostics, engine controls, and AI assistance are ready.")
         self._refresh_coding_workspace_files()
 
     def _refresh_coding_workspace_files(self) -> None:
         root = self._coding_workspace_root()
         if root is None:
-            self._choose_coding_workspace()
+            self._show_coding_engine_home()
             return
+        self._show_coding_workspace()
+        self._refresh_coding_engine_status()
         query = self.code_search_entry.get().strip() if self.code_search_entry is not None else ""
         self._refresh_code_runner_options(root)
         self._set_command_status("Scanning coding workspace...")
@@ -7528,6 +7822,16 @@ class JarvisApp(ctk.CTk):
         self._set_command_status(f"{len(files)} source files{suffix}")
 
     def _select_coding_file(self, path: Path) -> None:
+        if self.code_editor_dirty and self.code_selected_path != path:
+            choice = messagebox.askyesnocancel(
+                "Unsaved Code",
+                "Save changes to the current file before opening another one?",
+                parent=self,
+            )
+            if choice is None:
+                return
+            if choice and not self._save_coding_file():
+                return
         if self.code_pending_edit is not None:
             if self.code_selected_path == path:
                 self._append_chat("System", "A proposed edit is still awaiting review. Apply or discard it before replacing the diff preview.")
@@ -7545,12 +7849,14 @@ class JarvisApp(ctk.CTk):
         ok, text = read_coding_file(safe_path)
         self.code_selected_path = safe_path if ok else None
         if self.code_preview_box is not None:
-            self.code_preview_box.configure(state="normal")
             self.code_preview_box.delete("1.0", "end")
             self.code_preview_box.insert("1.0", text)
-            self.code_preview_box.configure(state="disabled")
             self.code_preview_box.see("1.0")
+            self.code_preview_box.edit_modified(False)
         relative = str(safe_path.relative_to(root))
+        self.code_editor_hash = hashlib.sha256(safe_path.read_bytes()).hexdigest() if ok else ""
+        self.code_editor_dirty = False
+        self.code_file_label_var.set(relative if ok else "Unable to open file")
         self._set_command_status(f"Reading {relative}" if ok else text)
 
     def _explain_selected_code_file(self) -> None:
@@ -7567,6 +7873,8 @@ class JarvisApp(ctk.CTk):
         if not ok:
             self._append_chat("System", source)
             return
+        if self.code_editor_dirty and self.code_preview_box is not None:
+            source = self.code_preview_box.get("1.0", "end-1c")
         question = self.code_question_entry.get().strip() if self.code_question_entry is not None else ""
         if self.code_question_entry is not None:
             self.code_question_entry.delete(0, "end")
@@ -7652,6 +7960,10 @@ class JarvisApp(ctk.CTk):
                     f"DURATION: {result.get('duration', 0)} seconds\n\n"
                 )
                 if self.code_preview_box is not None:
+                    self.code_selected_path = None
+                    self.code_editor_hash = ""
+                    self.code_editor_dirty = False
+                    self.code_file_label_var.set("Runner Output")
                     self.code_preview_box.configure(state="normal")
                     self.code_preview_box.delete("1.0", "end")
                     self.code_preview_box.insert("1.0", header + output)
@@ -7684,6 +7996,10 @@ class JarvisApp(ctk.CTk):
             output = format_coding_diagnostics(report)
             def deliver() -> None:
                 if self.code_preview_box is not None:
+                    self.code_selected_path = None
+                    self.code_editor_hash = ""
+                    self.code_editor_dirty = False
+                    self.code_file_label_var.set("Project Diagnostics")
                     self.code_preview_box.configure(state="normal")
                     self.code_preview_box.delete("1.0", "end")
                     self.code_preview_box.insert("1.0", output)
@@ -7711,6 +8027,10 @@ class JarvisApp(ctk.CTk):
         selected = self.code_selected_path
         if root is None or selected is None:
             self._append_chat("System", "Select a source file before requesting an edit.")
+            return
+        if self.code_editor_dirty:
+            self._append_chat("System", "Save or discard your direct editor changes before asking A.T.L.A.S to propose another edit.")
+            self._set_command_status("Unsaved editor changes")
             return
         safe_path = safe_coding_workspace_file(root, selected)
         if safe_path is None:
@@ -8189,7 +8509,7 @@ class JarvisApp(ctk.CTk):
         if panel == "side":
             return (260, 300)
         if panel == "code":
-            return (560, 360)
+            return (700, 480)
         if panel == "news":
             return (420, 330)
         if panel == "article":
@@ -8212,7 +8532,7 @@ class JarvisApp(ctk.CTk):
         if panel == "side":
             return (0.30, 0.82)
         if panel == "code":
-            return (0.62, 0.68)
+            return (0.96, 0.94)
         if panel == "news":
             return (0.46, 0.62)
         if panel == "article":

@@ -7,9 +7,45 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import jarvis
+import atlas_coding
 
 
 class CodingWorkspaceTests(unittest.TestCase):
+    def test_coding_engine_creates_saves_and_reversibly_deletes_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = atlas_coding.create_script(root, "scripts/player.gd", "extends Node\n")
+            original_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+            _saved, backup = atlas_coding.save_script(
+                root,
+                "scripts/player.gd",
+                "extends CharacterBody2D\n",
+                original_hash,
+            )
+            self.assertTrue(backup.exists())
+            self.assertEqual(target.read_text(encoding="utf-8"), "extends CharacterBody2D\n")
+            trash = atlas_coding.delete_script(root, "scripts/player.gd")
+            self.assertFalse(target.exists())
+            self.assertTrue(trash.exists())
+            self.assertIn(".atlas_trash", trash.parts)
+
+    def test_coding_engine_confines_all_paths_to_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            with self.assertRaises(ValueError):
+                atlas_coding.create_script(root, "../outside.py", "")
+            with self.assertRaises(ValueError):
+                atlas_coding.create_script(root, ".git/config", "")
+
+    def test_coding_engine_detects_godot_and_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "project.godot").write_text("[application]\nconfig/name=\"Demo\"\n", encoding="utf-8")
+            details = atlas_coding.detect_project(root)
+            self.assertEqual(details["type"], "Godot")
+            self.assertIn("project.godot", details["settings_files"])
+
     def test_search_finds_filename_and_source_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
