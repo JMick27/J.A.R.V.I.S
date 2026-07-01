@@ -1,5 +1,5 @@
 """
-JARVIS Desktop Assistant
+ATLAS Desktop Assistant
 
 A Windows-friendly desktop AI assistant with text chat, voice input, speech
 output, active-window awareness, music selection, safe app launching, and a
@@ -107,7 +107,8 @@ except Exception:
     pygame = None
 
 
-APP_NAME = "JARVIS Desktop Assistant"
+APP_NAME = "ATLAS Desktop Assistant"
+LEGACY_APP_NAME = "JARVIS Desktop Assistant"
 PERMISSION_MODES = ("Ask for approval", "Approve for me", "Full access")
 UI_BG = "#030712"
 UI_PANEL = "#07111f"
@@ -125,7 +126,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.3.0"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -158,7 +159,22 @@ DEFAULT_VIDEO_NEWS_FEEDS = {
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
 HAND_LANDMARKER_MODEL_PATH = RESOURCE_DIR / "hand_landmarker.task"
-DATA_DIR = Path(os.environ.get("APPDATA", str(BASE_DIR))) / APP_NAME if getattr(sys, "frozen", False) else BASE_DIR
+APPDATA_ROOT = Path(os.environ.get("APPDATA", str(BASE_DIR)))
+DATA_DIR = APPDATA_ROOT / APP_NAME if getattr(sys, "frozen", False) else BASE_DIR
+LEGACY_DATA_DIR = APPDATA_ROOT / LEGACY_APP_NAME if getattr(sys, "frozen", False) else BASE_DIR
+
+if getattr(sys, "frozen", False) and LEGACY_DATA_DIR.exists() and not DATA_DIR.exists():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for legacy_name in [
+        "settings.json", "personality.json", "jarvis_memory.json", "health_readings.json",
+        "health_bridge_token.txt", "phone_actions.json", "phone_bridge_token.txt", "spotify_token.dat",
+    ]:
+        legacy_path = LEGACY_DATA_DIR / legacy_name
+        if legacy_path.is_file():
+            try:
+                shutil.copy2(legacy_path, DATA_DIR / legacy_name)
+            except OSError:
+                pass
 SETTINGS_PATH = DATA_DIR / "settings.json"
 MEMORY_PATH = DATA_DIR / "jarvis_memory.json"
 PERSONALITY_PATH = DATA_DIR / "personality.json"
@@ -178,10 +194,13 @@ win_keyboard = None
 _PYWINAUTO_ATTEMPTED = False
 
 SYSTEM_PROMPT = """
-You are JARVIS, a sarcastic, charming, clever, and highly capable AI desktop
+You are ATLAS, a sarcastic, charming, clever, and highly capable AI desktop
 assistant. You are calm under pressure, concise when needed, and witty without
 being annoying. You help the user control their computer, answer questions,
 plan tasks, open apps, detect context from the current screen, and choose music.
+ATLAS stands for Adaptive Task, Learning & Automation System. Use that expansion
+when explaining your name, but do not claim to learn outside the app's saved
+settings and explicit memory systems.
 You should sound polished, intelligent, and slightly teasing, like a futuristic
 assistant. Never claim to have done something unless the program actually
 performed the action. Keep sarcasm light and friendly, never mean.
@@ -243,7 +262,7 @@ DEFAULT_MISSION_TEMPLATES = [
     },
     {
         "name": "Command Center Check",
-        "description": "Review JARVIS mode, awareness, integrations, and recent actions.",
+        "description": "Review ATLAS mode, awareness, integrations, and recent actions.",
         "steps": [
             "mode status",
             "awareness status",
@@ -335,7 +354,7 @@ DEFAULT_SETTINGS = {
     "spotify_client_id": "",
     "spotify_redirect_port": 8767,
     "spotify_library_cache": {},
-    "wake_phrase": "jarvis",
+    "wake_phrase": "atlas",
     "theme": "dark",
     "ai_provider": "gemini",
     "auto_select_gemini_model": True,
@@ -524,7 +543,7 @@ DEFAULT_SETTINGS = {
 }
 
 DEFAULT_PERSONALITY = {
-    "assistant_name": "J.A.R.V.I.S.",
+    "assistant_name": "A.T.L.A.S.",
     "user_name": "",
     "sarcasm_level": 3,
     "formality": "polished",
@@ -547,7 +566,7 @@ INTEGRATION_CATALOG: dict[str, dict[str, Any]] = {
         "category": "Local PC",
         "env": ["GEMINI_API_KEY"],
         "setup_url": "https://ai.google.dev/gemini-api/docs/vision",
-        "notes": "Lets JARVIS inspect screenshots and reason about visible UI.",
+        "notes": "Lets ATLAS inspect screenshots and reason about visible UI.",
     },
     "mouse_control": {
         "name": "Mouse Control",
@@ -599,7 +618,7 @@ INTEGRATION_CATALOG: dict[str, dict[str, Any]] = {
         "notes": "Microsoft Store app launching and UI-assisted search/play.",
     },
     "phone_bridge": {
-        "name": "JARVIS Phone Bridge",
+        "name": "ATLAS Phone Bridge",
         "category": "Phone",
         "env": [],
         "setup_url": "",
@@ -879,11 +898,19 @@ def load_settings() -> dict[str, Any]:
         saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return DEFAULT_SETTINGS.copy()
-    return _merge_settings(DEFAULT_SETTINGS, saved)
+    settings = _merge_settings(DEFAULT_SETTINGS, saved)
+    if settings != saved:
+        try:
+            SETTINGS_PATH.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+    return settings
 
 
 def _merge_settings(defaults: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
     merged = {**defaults, **saved}
+    if str(merged.get("wake_phrase", "")).strip().lower() in {"jarvis", "jervis", "charvis"}:
+        merged["wake_phrase"] = "atlas"
     if isinstance(defaults.get("custom_app_paths"), dict) and isinstance(saved.get("custom_app_paths"), dict):
         merged["custom_app_paths"] = {**defaults["custom_app_paths"], **saved["custom_app_paths"]}
     if isinstance(defaults.get("integrations"), dict):
@@ -924,7 +951,14 @@ def load_personality() -> dict[str, Any]:
     try:
         saved = json.loads(PERSONALITY_PATH.read_text(encoding="utf-8"))
         if isinstance(saved, dict):
-            return {**DEFAULT_PERSONALITY, **saved}
+            merged = {**DEFAULT_PERSONALITY, **saved}
+            if str(merged.get("assistant_name", "")).strip().lower().replace(".", "") == "jarvis":
+                merged["assistant_name"] = "A.T.L.A.S."
+                try:
+                    PERSONALITY_PATH.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+                except OSError:
+                    pass
+            return merged
     except Exception:
         pass
     return DEFAULT_PERSONALITY.copy()
@@ -970,7 +1004,7 @@ def save_memories(memories: list[dict[str, str]]) -> None:
             }
         )
     payload = {
-        "description": "Explicit JARVIS memories only. Chat transcripts are not stored here.",
+        "description": "Explicit ATLAS memories only. Chat transcripts are not stored here.",
         "updated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "memories": safe_memories,
     }
@@ -1000,12 +1034,12 @@ def load_environment() -> None:
         load_dotenv()
 
     config_path = RESOURCE_DIR / "distribution_config.json"
-    if config_path.exists() and not os.getenv("JARVIS_AI_PROXY_URL"):
+    if config_path.exists() and not (os.getenv("ATLAS_AI_PROXY_URL") or os.getenv("JARVIS_AI_PROXY_URL")):
         try:
             public_config = json.loads(config_path.read_text(encoding="utf-8"))
             proxy_url = str(public_config.get("ai_proxy_url", "")).strip()
             if proxy_url:
-                os.environ["JARVIS_AI_PROXY_URL"] = proxy_url
+                os.environ["ATLAS_AI_PROXY_URL"] = proxy_url
         except (OSError, ValueError, TypeError):
             pass
 
@@ -1077,14 +1111,14 @@ def set_integration_enabled(settings: dict[str, Any], key: str, enabled: bool) -
 def integration_status(key: str, settings: dict[str, Any]) -> tuple[str, str]:
     enabled = integration_enabled(settings, key)
     if not enabled:
-        return "Disabled", "Turn it on when you want JARVIS to use it."
+        return "Disabled", "Turn it on when you want ATLAS to use it."
 
     env_vars = [str(name) for name in INTEGRATION_CATALOG.get(key, {}).get("env", [])]
     missing_env = [name for name in env_vars if not os.getenv(name)]
 
     if key == "windows_control":
         return "Ready", "Built-in Windows automation is available."
-    gemini_configured = bool(os.getenv("JARVIS_AI_PROXY_URL", "").strip() or os.getenv("GEMINI_API_KEY", "").strip())
+    gemini_configured = bool(os.getenv("ATLAS_AI_PROXY_URL", "").strip() or os.getenv("JARVIS_AI_PROXY_URL", "").strip() or os.getenv("GEMINI_API_KEY", "").strip())
     if key == "screen_vision":
         return ("Ready", "Gemini vision is connected.") if gemini_configured else ("Offline", "AI service is not configured.")
     if key == "mouse_control":
@@ -1194,7 +1228,7 @@ def delayed_media_play_pause(delay_seconds: int | float = 3) -> None:
 
 def clean_music_query_text(query: str) -> str:
     query = str(query or "").strip().strip(".")
-    query = re.sub(r"^\s*(?:jarvis|hey\s+jarvis)[,\s]+", "", query, flags=re.I).strip()
+    query = re.sub(r"^\s*(?:(?:atlas|jarvis)|hey\s+(?:atlas|jarvis))[,\s]+", "", query, flags=re.I).strip()
     query = re.sub(r"^\s*(?:please\s+)?(?:play|start|search|find|open)\s+", "", query, flags=re.I).strip()
     query = re.sub(r"^\s*(?:apple\s+music|music\s+app|spotify|youtube\s+music|youtube)\s+(?:for\s+)?", "", query, flags=re.I).strip()
     query = re.sub(r"^\s*for\s+", "", query, flags=re.I).strip()
@@ -1250,7 +1284,7 @@ def clean_music_query_text(query: str) -> str:
 
 def extract_apple_music_playlist_name(text: str) -> str | None:
     """Return a spoken Apple Music library playlist name, or None for song requests."""
-    cleaned = re.sub(r"^\s*(?:hey\s+)?jarvis[,\s]+", "", str(text or ""), flags=re.I).strip()
+    cleaned = re.sub(r"^\s*(?:hey\s+)?(?:atlas|jarvis)[,\s]+", "", str(text or ""), flags=re.I).strip()
     cleaned = re.sub(r"^\s*(?:can|could|would)\s+you\s+", "", cleaned, flags=re.I).strip()
     patterns = [
         r"\b(?:play|start|open)\s+(.+?\bplaylist)\s+(?:on|in|from|using)\s+(?:my\s+)?apple\s+music(?:\s+library)?\b",
@@ -1654,6 +1688,7 @@ def known_folder_path(name: str) -> Path | None:
         "screenshots": SCREENSHOTS_DIR,
         "project": BASE_DIR,
         "jarvis": BASE_DIR,
+        "atlas": BASE_DIR,
     }
     return folders.get(name.lower().strip())
 
@@ -1832,7 +1867,7 @@ def apply_code_edit_with_backup(
         resolved_root = root.resolve()
         backup_root = resolved_root / ".jarvis_backups"
         if backup_root.exists() and backup_root.is_symlink():
-            return False, "The backup folder is a symbolic link, so JARVIS refused to write through it.", None
+            return False, "The backup folder is a symbolic link, so ATLAS refused to write through it.", None
         backup_root.mkdir(parents=True, exist_ok=True)
         try:
             backup_root.resolve().relative_to(resolved_root)
@@ -2884,7 +2919,7 @@ def fetch_news_article(item: dict[str, str]) -> tuple[str, str]:
             link,
             timeout=12,
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 JARVIS/1.0",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ATLAS/1.0",
                 "Accept": "text/html,application/xhtml+xml",
             },
         )
@@ -3126,7 +3161,7 @@ def capture_screen_png(max_width: int = 1600) -> tuple[bytes, tuple[int, int]]:
 
 
 AGENT_SYSTEM_PROMPT = """
-You are the tool-planning layer for JARVIS. Choose exactly one approved tool call
+You are the tool-planning layer for ATLAS. Choose exactly one approved tool call
 at a time, or return a final answer when the task is complete. You may not invent
 tools, run terminal commands, delete files without confirmation, send messages,
 buy things, change passwords, or enter private/private-looking information.
@@ -3974,6 +4009,8 @@ class GeminiProxyClient:
             "User-Agent": f"{APP_NAME}/{APP_VERSION}",
             "X-JARVIS-Version": APP_VERSION,
             "X-JARVIS-Install": installation_id,
+            "X-ATLAS-Version": APP_VERSION,
+            "X-ATLAS-Install": installation_id,
         }
         self.models = GeminiProxyModels(self)
 
@@ -4022,7 +4059,7 @@ class JarvisAssistant:
     def _setup_ai_clients(self) -> None:
         if os.getenv("OPENAI_API_KEY"):
             self.openai_client = OpenAI()
-        proxy_url = os.getenv("JARVIS_AI_PROXY_URL", "").strip()
+        proxy_url = (os.getenv("ATLAS_AI_PROXY_URL") or os.getenv("JARVIS_AI_PROXY_URL") or "").strip()
         if proxy_url:
             self.gemini_client = GeminiProxyClient(proxy_url, str(self.settings.get("installation_id", "unknown")))
         elif genai is not None and os.getenv("GEMINI_API_KEY"):
@@ -4220,10 +4257,10 @@ class JarvisAssistant:
             (re.compile(r"\bscroll\s+(up|down)(?:\s+(\d{1,2}))?\b", re.I), self._scroll_mouse),
             (re.compile(r"\b(?:list|show)\s+(?:open\s+)?windows\b", re.I), self._list_windows),
             (re.compile(r"\b(?:switch|focus|go)\s+to\s+(?:window\s+)?(.+)", re.I), self._switch_window),
-            (re.compile(r"\bopen\s+(desktop|downloads|documents|pictures|music|videos|screenshots|project|jarvis)\s+folder\b", re.I), self._open_known_folder),
-            (re.compile(r"\bcreate\s+(?:a\s+)?folder\s+(?:named\s+)?(.+?)\s+(?:on|in)\s+(desktop|downloads|documents|pictures|project|jarvis)\b", re.I), self._create_known_folder),
-            (re.compile(r"\b(?:list|show)\s+(desktop|downloads|documents|pictures|music|videos|screenshots|project|jarvis)(?:\s+files)?\b", re.I), self._list_known_folder),
-            (re.compile(r"\bopen\s+(?:the\s+)?(?:newest|latest|most recent)\s+(?:file\s+)?(?:in|from)\s+(desktop|downloads|documents|pictures|music|videos|screenshots|project|jarvis)\b", re.I), self._open_recent_file),
+            (re.compile(r"\bopen\s+(desktop|downloads|documents|pictures|music|videos|screenshots|project|atlas|jarvis)\s+folder\b", re.I), self._open_known_folder),
+            (re.compile(r"\bcreate\s+(?:a\s+)?folder\s+(?:named\s+)?(.+?)\s+(?:on|in)\s+(desktop|downloads|documents|pictures|project|atlas|jarvis)\b", re.I), self._create_known_folder),
+            (re.compile(r"\b(?:list|show)\s+(desktop|downloads|documents|pictures|music|videos|screenshots|project|atlas|jarvis)(?:\s+files)?\b", re.I), self._list_known_folder),
+            (re.compile(r"\bopen\s+(?:the\s+)?(?:newest|latest|most recent)\s+(?:file\s+)?(?:in|from)\s+(desktop|downloads|documents|pictures|music|videos|screenshots|project|atlas|jarvis)\b", re.I), self._open_recent_file),
             (re.compile(r"\b(?:awareness|monitoring|proactive mode)\s+(on|off|enable|disable)\b|\b(?:enable|disable|turn on|turn off)\s+(?:awareness|monitoring|proactive mode)\b", re.I), self._set_awareness_mode),
             (re.compile(r"\b(?:awareness status|monitoring status|what are you monitoring|proactive status)\b", re.I), self._awareness_status),
             (re.compile(r"\b(?:watch|monitor)\s+(?:project\s+|folder\s+)?(.+)", re.I), self._watch_project_folder),
@@ -4642,14 +4679,14 @@ class JarvisAssistant:
         trimmed = document_text[:max_chars]
         truncated = len(document_text) > len(trimmed)
         prompt = (
-            "You are JARVIS helping the user revise a novel draft. Give honest, specific, constructive writing feedback. "
+            "You are ATLAS helping the user revise a novel draft. Give honest, specific, constructive writing feedback. "
             "Do not rewrite the whole piece. Focus on craft. Be encouraging but not fake. "
             "Use concise sections:\n"
             "1. What you did well\n"
             "2. What to work on\n"
             "3. Strongest moment\n"
             "4. Next revision moves\n"
-            "5. One polished JARVIS-style closing line\n\n"
+            "5. One polished ATLAS-style closing line\n\n"
             f"Active window/source title: {source_title or 'Unknown'}\n"
             f"Document was truncated for review: {'yes' if truncated else 'no'}\n\n"
             "Draft text:\n"
@@ -4685,7 +4722,7 @@ class JarvisAssistant:
         trimmed = file_text[:30000]
         was_truncated = len(file_text) > len(trimmed)
         prompt = (
-            "Act as JARVIS in Coding Mode: a concise, capable code mentor. Analyze only the supplied file. "
+            "Act as ATLAS in Coding Mode: a concise, capable code mentor. Analyze only the supplied file. "
             "Explain behavior with specific references to functions, classes, or sections. Call out likely bugs "
             "or risks only when supported by the code. Do not claim to have edited or run anything. "
             "Use these sections when useful: Summary, How it works, Risks, Suggested next step.\n\n"
@@ -4770,7 +4807,7 @@ class JarvisAssistant:
         context_lines = [
             f"User name: {self.settings.get('user_name') or 'not provided'}",
             f"Preferred user name/personality file: {self.personality.get('user_name') or 'not provided'}",
-            f"Assistant name: {self.personality.get('assistant_name', 'J.A.R.V.I.S.')}",
+            f"Assistant name: {self.personality.get('assistant_name', 'A.T.L.A.S.')}",
             f"Assistant mode: {self.current_mode}",
             f"Sarcasm level 0-5: {self.personality.get('sarcasm_level', 3)}",
             f"Formality: {self.personality.get('formality', 'polished')}",
@@ -4833,7 +4870,7 @@ class JarvisAssistant:
         if genai is None or genai_types is None:
             return "Gemini support is not installed. Run pip install -r requirements.txt, then try again."
         if self.gemini_client is None:
-            return "Gemini is not configured. Check the JARVIS AI service connection and try again."
+            return "Gemini is not configured. Check the ATLAS AI service connection and try again."
 
         models_to_try, intentional_fast_route = self._gemini_chat_models_to_try(user_text)
         last_error = None
@@ -4908,7 +4945,7 @@ class JarvisAssistant:
         if genai is None or genai_types is None:
             return "Gemini support is not installed, so I cannot analyze the screen yet."
         if self.gemini_client is None:
-            return "Gemini is not configured, so screen vision is unavailable. Check the JARVIS AI service connection."
+            return "Gemini is not configured, so screen vision is unavailable. Check the ATLAS AI service connection."
 
         try:
             png_bytes, original_size = capture_screen_png()
@@ -4923,7 +4960,7 @@ class JarvisAssistant:
             "Analyze the attached screenshot. Describe what is visible, identify important buttons, menus, text fields, "
             "warnings, selected items, and likely next steps. If the user asks where to click, give a practical target "
             "description and approximate location such as top-left, center, or bottom-right; do not claim to click anything. "
-            "Be concise, useful, and keep the JARVIS tone light."
+            "Be concise, useful, and keep the ATLAS tone light."
         )
         last_error = None
         for model in self._gemini_models_to_try():
@@ -5180,9 +5217,9 @@ class JarvisAssistant:
         self.history = self.history[-self.max_history :]
 
     def _strip_wake_phrase(self, text: str) -> str:
-        wake_phrase = str(self.settings.get("wake_phrase", "jarvis")).lower()
+        wake_phrase = str(self.settings.get("wake_phrase", "atlas")).lower()
         lowered = text.lower().strip()
-        for phrase in [wake_phrase, f"hey {wake_phrase}"]:
+        for phrase in [f"hey {wake_phrase}", wake_phrase, "hey atlas", "atlas", "hey jarvis", "jarvis"]:
             if lowered.startswith(phrase):
                 return text[len(phrase) :].strip(" ,.")
         return text
@@ -5385,7 +5422,7 @@ class JarvisAssistant:
         self.record_action("queue_mobile_apple_music", {"query": query, "id": item.get("id")}, "medium", True, f"Queued mobile Apple Music request for {query}.", verified=True)
         return (
             f"Queued '{query}' for Apple Music on your mobile device. "
-            "Run the JARVIS Phone Bridge Shortcut on your iPhone and it will fetch the request. "
+            "Run the ATLAS Phone Bridge Shortcut on your iPhone and it will fetch the request. "
             "Tiny relay baton passed, sir."
         )
 
@@ -6131,7 +6168,7 @@ class JarvisAssistant:
 
     def _timer_thread(self, minutes: int) -> None:
         time.sleep(max(1, minutes) * 60)
-        messagebox.showinfo("JARVIS", f"Focus timer complete: {minutes} minutes.")
+        messagebox.showinfo("ATLAS", f"Focus timer complete: {minutes} minutes.")
 
 
 LOCAL_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"}
@@ -6228,7 +6265,7 @@ class LocalMusicPlayer:
 
     def toggle_pause(self) -> tuple[bool, str]:
         if not self.initialized or not self.current_path:
-            return False, "Nothing is playing in JARVIS Music."
+            return False, "Nothing is playing in ATLAS Music."
         if self.paused:
             pygame.mixer.music.unpause()
             self.paused = False
@@ -6346,7 +6383,7 @@ class JarvisApp(ctk.CTk):
         self.browser_panel: ctk.CTkFrame | None = None
         self.browser_surface: tk.Frame | None = None
         self.browser_address_var = ctk.StringVar(value="")
-        self.browser_status_var = ctk.StringVar(value="JARVIS Engine standing by.")
+        self.browser_status_var = ctk.StringVar(value="ATLAS Engine standing by.")
         self.browser_process: subprocess.Popen[Any] | None = None
         self.browser_hwnd = 0
         self.browser_debug_port = 0
@@ -6368,7 +6405,7 @@ class JarvisApp(ctk.CTk):
         self.local_music_player = LocalMusicPlayer(float(self.assistant.settings.get("local_music_volume", 0.72)))
         self.local_music_now_var = ctk.StringVar(value="Nothing playing")
         self.local_music_state_var = ctk.StringVar(
-            value="JARVIS Music ready" if self.local_music_player.available else self.local_music_player.error
+            value="ATLAS Music ready" if self.local_music_player.available else self.local_music_player.error
         )
         self.local_music_startup_var = ctk.StringVar(value="Off")
         self.local_music_volume_var = ctk.DoubleVar(value=float(self.assistant.settings.get("local_music_volume", 0.72)))
@@ -6489,6 +6526,7 @@ class JarvisApp(ctk.CTk):
         self._start_location_refresh()
         self._start_health_bridge_if_enabled()
         self._start_phone_bridge_if_enabled()
+        threading.Thread(target=self._refresh_atlas_launcher_install, daemon=True).start()
         self.after(700, self._poll_local_music_player)
         self.after(3200, self._start_local_music_autoplay)
         threading.Thread(target=self._tts_worker, daemon=True).start()
@@ -6595,7 +6633,7 @@ class JarvisApp(ctk.CTk):
         self._append_chat("System", message)
         self._set_command_status(message)
         if source == "overlay":
-            self._set_overlay_response(f"JARVIS: {message}")
+            self._set_overlay_response(f"ATLAS: {message}")
 
     def _copy_to_clipboard(self, value: str, label: str) -> None:
         self.clipboard_clear()
@@ -6608,7 +6646,7 @@ class JarvisApp(ctk.CTk):
                 "heart_rate": 82,
                 "hrv": 42,
                 "activity": self.assistant.settings.get("health_current_activity", "test"),
-                "source": "JARVIS test button",
+                "source": "ATLAS test button",
             }
             reading = normalize_health_payload(payload, self._health_context())
             history = self.health_store.readings()
@@ -6668,19 +6706,19 @@ class JarvisApp(ctk.CTk):
         body.grid_columnconfigure(0, weight=1)
         instructions = (
             "iPhone Shortcut setup\n"
-            "1. On your iPhone, open Shortcuts, tap +, and name it Send Health To JARVIS.\n"
+            "1. On your iPhone, open Shortcuts, tap +, and name it Send Health To ATLAS.\n"
             "2. Add Find Health Samples. Set Type to Heart Rate, Sort by Start Date Latest First, and Limit to 1.\n"
             "3. Add Get Details of Health Samples. Set Detail to Value. This becomes your heart_rate value.\n"
             "4. Add another Get Details of Health Samples. Set Detail to Start Date. This becomes your timestamp value.\n"
             "5. Add Get Contents of URL. Put the Shortcut URL above into the URL field.\n"
             "6. Tap Show More. Set Method to POST and Request Body to JSON.\n"
-            "7. In Headers, add X-JARVIS-Health-Token with the Pairing Code above.\n"
+            "7. In Headers, add X-ATLAS-Health-Token with the Pairing Code above.\n"
             "8. Under Request Body JSON, add two Text rows only.\n"
             "9. Row one: left Key box = heart_rate. Right Text box = the Heart Rate Value from step 3.\n"
             "10. Row two: left Key box = timestamp. Right Text box = the Start Date from step 4.\n"
-            "11. Do not add activity or source unless you already know how to type literal text into Shortcuts. JARVIS fills those in automatically.\n"
+            "11. Do not add activity or source unless you already know how to type literal text into Shortcuts. ATLAS fills those in automatically.\n"
             "12. Run it once while the iPhone and this PC are on the same Wi-Fi. If Windows asks, allow private-network access.\n\n"
-            "If Shortcuts shows the heart rate with units, like 82 count/min, that is fine. JARVIS extracts the number.\n"
+            "If Shortcuts shows the heart rate with units, like 82 count/min, that is fine. ATLAS extracts the number.\n"
             "Optional JSON fields: hrv, resting_heart_rate, activity, source. This is wellness context, not medical diagnosis."
         )
         ctk.CTkLabel(body, text=instructions, text_color="#d9f7ff", justify="left", anchor="nw", wraplength=680).grid(row=0, column=0, sticky="ew", padx=12, pady=12)
@@ -6732,7 +6770,7 @@ class JarvisApp(ctk.CTk):
         bridge_line = bridge_status.message if bridge_status is not None else "Phone bridge is off."
         if bridge_status is not None and bridge_status.running:
             bridge_line = f"Listening at {bridge_status.url}"
-        return f"JARVIS Phone Bridge: {bridge_line}\nPending mobile actions: {self.phone_queue.pending_count()}"
+        return f"ATLAS Phone Bridge: {bridge_line}\nPending mobile actions: {self.phone_queue.pending_count()}"
 
     def open_phone_bridge_window(self) -> None:
         if self.phone_bridge is None and integration_enabled(self.assistant.settings, "phone_bridge"):
@@ -6741,7 +6779,7 @@ class JarvisApp(ctk.CTk):
         url = status.url if status is not None else f"http://127.0.0.1:{int(self.assistant.settings.get('phone_bridge_port', 8766))}/phone/next"
 
         window = ctk.CTkToplevel(self)
-        window.title("JARVIS Phone Bridge")
+        window.title("ATLAS Phone Bridge")
         self._apply_window_icon(window)
         window.geometry("760x680")
         window.minsize(680, 560)
@@ -6750,7 +6788,7 @@ class JarvisApp(ctk.CTk):
         window.grid_columnconfigure(0, weight=1)
         window.grid_rowconfigure(3, weight=1)
 
-        ctk.CTkLabel(window, text="JARVIS Phone Bridge", font=ctk.CTkFont(size=22, weight="bold"), text_color="#8be9ff").grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
+        ctk.CTkLabel(window, text="ATLAS Phone Bridge", font=ctk.CTkFont(size=22, weight="bold"), text_color="#8be9ff").grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         ctk.CTkLabel(
             window,
             text="Lets an iPhone Shortcut fetch approved phone-side actions, starting with Apple Music on your mobile device.",
@@ -6780,9 +6818,9 @@ class JarvisApp(ctk.CTk):
         body.grid_columnconfigure(0, weight=1)
         instructions = (
             "iPhone Shortcut setup for mobile Apple Music\n"
-            "1. Open Shortcuts on your iPhone, tap +, and name it JARVIS Phone Bridge.\n"
+            "1. Open Shortcuts on your iPhone, tap +, and name it ATLAS Phone Bridge.\n"
             "2. Add Get Contents of URL. Use the Shortcut URL above.\n"
-            "3. Tap Show More. Add header X-JARVIS-Phone-Token with the Pairing Code above.\n"
+            "3. Tap Show More. Add header X-ATLAS-Phone-Token with the Pairing Code above.\n"
             "4. Add Get Dictionary Value. Key = action. Dictionary = Contents of URL.\n"
             "5. Add If. Tap the first blue value and choose the Dictionary Value from step 4. Set the condition to is. Type play_apple_music in the last field as plain text.\n"
             "6. Drag the music actions below inside the If block, above Otherwise.\n"
@@ -6790,7 +6828,7 @@ class JarvisApp(ctk.CTk):
             "8. Add Search Apple Music. Search for the query value from step 7.\n"
             "9. Add Get Item from List. Choose First Item.\n"
             "10. Add Play Music using that first item.\n\n"
-            "Then ask JARVIS: play Master of Puppets on my phone. The shortcut fetches exactly one queued request."
+            "Then ask ATLAS: play Master of Puppets on my phone. The shortcut fetches exactly one queued request."
         )
         ctk.CTkLabel(body, text=instructions, text_color="#d9f7ff", justify="left", anchor="nw", wraplength=680).grid(row=0, column=0, sticky="ew", padx=12, pady=12)
         status_box = ctk.CTkTextbox(body, height=120, fg_color="#09101d", text_color="#d9f7ff", border_width=1, border_color="#123f5a")
@@ -6862,7 +6900,7 @@ class JarvisApp(ctk.CTk):
             greeting = "Good evening"
         user_name = str(self.assistant.personality.get("startup_greeting_name") or self.assistant.personality.get("user_name") or "there")
         lines = [
-            "Initializing J.A.R.V.I.S.",
+            "Initializing A.T.L.A.S.",
             f"Voice system {'online' if self.voice_backend != 'unavailable' else 'offline'}",
             f"Vision system {'online' if self.assistant.gemini_client is not None else 'offline'}",
             f"Mouse control set to {self.assistant.settings.get('mouse_control_mode', 'Safe')} mode",
@@ -6931,8 +6969,8 @@ class JarvisApp(ctk.CTk):
         command_header.grid_columnconfigure(0, weight=1)
         title_row = ctk.CTkFrame(command_header, fg_color="transparent")
         title_row.grid(row=0, column=0, sticky="w", padx=18, pady=(11, 0))
-        ctk.CTkLabel(title_row, text="J.A.R.V.I.S.", font=ctk.CTkFont(size=32, weight="bold"), text_color=UI_TEXT).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(title_row, text="COMMAND CENTER", font=ctk.CTkFont(size=12, weight="bold"), text_color=UI_CYAN).grid(row=0, column=1, sticky="w", padx=(12, 0), pady=(8, 0))
+        ctk.CTkLabel(title_row, text="A.T.L.A.S.", font=ctk.CTkFont(size=32, weight="bold"), text_color=UI_TEXT).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(title_row, text="ADAPTIVE TASK, LEARNING & AUTOMATION SYSTEM", font=ctk.CTkFont(size=10, weight="bold"), text_color=UI_CYAN).grid(row=0, column=1, sticky="w", padx=(12, 0), pady=(8, 0))
         status_pill = ctk.CTkFrame(command_header, fg_color=UI_PANEL_ALT, corner_radius=14, border_width=1, border_color=UI_BORDER)
         status_pill.grid(row=1, column=0, sticky="w", padx=20, pady=(2, 12))
         ctk.CTkLabel(status_pill, text="STATUS", font=ctk.CTkFont(size=10, weight="bold"), text_color=UI_GREEN).grid(row=0, column=0, padx=(12, 6), pady=4)
@@ -7279,7 +7317,7 @@ class JarvisApp(ctk.CTk):
         self.browser_panel = browser_panel
         browser_panel.grid_columnconfigure(0, weight=1)
         browser_panel.grid_rowconfigure(2, weight=1)
-        browser_handle = self._panel_drag_handle(browser_panel, "JARVIS ENGINE")
+        browser_handle = self._panel_drag_handle(browser_panel, "ATLAS ENGINE")
         browser_handle.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
         browser_toolbar = ctk.CTkFrame(browser_panel, fg_color="transparent")
         browser_toolbar.grid(row=1, column=0, sticky="ew", padx=10, pady=7)
@@ -7289,7 +7327,7 @@ class JarvisApp(ctk.CTk):
         ctk.CTkButton(browser_toolbar, text="Next", command=lambda: self._browser_history("forward"), **browser_button_style).grid(row=0, column=1, padx=4)
         ctk.CTkButton(browser_toolbar, text="Home", command=self._browser_home, **browser_button_style).grid(row=0, column=2, padx=4)
         ctk.CTkButton(browser_toolbar, text="Reload", command=self._browser_reload, **browser_button_style).grid(row=0, column=3, padx=4)
-        browser_address = ctk.CTkEntry(browser_toolbar, textvariable=self.browser_address_var, placeholder_text="Search with JARVIS Engine or enter an address...", height=32, fg_color=UI_PANEL_DEEP, border_color=UI_BORDER_SOFT)
+        browser_address = ctk.CTkEntry(browser_toolbar, textvariable=self.browser_address_var, placeholder_text="Search with ATLAS Engine or enter an address...", height=32, fg_color=UI_PANEL_DEEP, border_color=UI_BORDER_SOFT)
         browser_address.grid(row=0, column=4, sticky="ew", padx=(6, 4))
         browser_address.bind("<Return>", lambda _event: self._browser_go())
         ctk.CTkButton(browser_toolbar, text="Go", width=48, height=30, fg_color=UI_BORDER, hover_color="#2898c5", command=self._browser_go).grid(row=0, column=5, padx=4)
@@ -7307,7 +7345,7 @@ class JarvisApp(ctk.CTk):
         self.music_player_panel = music_panel
         music_panel.grid_columnconfigure(0, weight=1)
         music_panel.grid_rowconfigure(3, weight=1)
-        music_handle = self._panel_drag_handle(music_panel, "JARVIS MUSIC")
+        music_handle = self._panel_drag_handle(music_panel, "ATLAS MUSIC")
         music_handle.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
 
         now_frame = ctk.CTkFrame(music_panel, fg_color=UI_CARD, corner_radius=8, border_width=1, border_color=UI_BORDER_SOFT)
@@ -7395,10 +7433,10 @@ class JarvisApp(ctk.CTk):
         self.spotify_library_listbox.bind("<Double-Button-1>", lambda _event: self._play_selected_spotify_item())
         ctk.CTkLabel(spotify_tab, textvariable=self.spotify_status_var, text_color=UI_MUTED, anchor="w").grid(row=2, column=0, sticky="ew", padx=6, pady=(2, 6))
 
-        ctk.CTkLabel(settings_tab, text="AUTOPLAY WHEN JARVIS OPENS", text_color=UI_CYAN, font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, sticky="ew", padx=12, pady=(18, 5))
+        ctk.CTkLabel(settings_tab, text="AUTOPLAY WHEN ATLAS OPENS", text_color=UI_CYAN, font=ctk.CTkFont(size=12, weight="bold"), anchor="w").grid(row=0, column=0, sticky="ew", padx=12, pady=(18, 5))
         self.music_startup_menu = ctk.CTkOptionMenu(settings_tab, values=["Off"], variable=self.local_music_startup_var, command=self._set_local_music_startup_choice, fg_color=UI_CARD, button_color=UI_BORDER, button_hover_color="#2898c5")
         self.music_startup_menu.grid(row=1, column=0, sticky="new", padx=12, pady=5)
-        ctk.CTkLabel(settings_tab, text="Choose one saved song or playlist. JARVIS stores its local path, never a copy of the audio file.", text_color=UI_MUTED, anchor="nw", justify="left", wraplength=520).grid(row=2, column=0, sticky="ew", padx=12, pady=8)
+        ctk.CTkLabel(settings_tab, text="Choose one saved song or playlist. ATLAS stores its local path, never a copy of the audio file.", text_color=UI_MUTED, anchor="nw", justify="left", wraplength=520).grid(row=2, column=0, sticky="ew", padx=12, pady=8)
 
         self._refresh_local_music_panel()
 
@@ -7406,7 +7444,7 @@ class JarvisApp(ctk.CTk):
         input_frame.grid(row=1, column=0, sticky="ew")
         input_frame.grid_columnconfigure(0, weight=1)
 
-        self.input_entry = ctk.CTkEntry(input_frame, placeholder_text="Ask JARVIS anything, or type a command...", height=42, fg_color=UI_PANEL_DEEP, border_color=UI_BORDER_SOFT, text_color=UI_TEXT)
+        self.input_entry = ctk.CTkEntry(input_frame, placeholder_text="Ask ATLAS anything, or type a command...", height=42, fg_color=UI_PANEL_DEEP, border_color=UI_BORDER_SOFT, text_color=UI_TEXT)
         self.input_entry.grid(row=0, column=0, sticky="ew", padx=(18, 8), pady=16)
         self.input_entry.bind("<Return>", lambda _event: self.send_text())
 
@@ -7423,7 +7461,7 @@ class JarvisApp(ctk.CTk):
         self._apply_command_center_visibility()
         self.after(180, self._place_command_panels)
         self.bind("<Configure>", self._on_main_window_configure, add="+")
-        self._append_chat("JARVIS", "Online. Text commands are ready; voice is standing by with theatrical restraint.")
+        self._append_chat("ATLAS", "Online. Text commands are ready; voice is standing by with theatrical restraint.")
         self._show_boot_screen()
 
     def _coding_workspace_root(self) -> Path | None:
@@ -7539,8 +7577,8 @@ class JarvisApp(ctk.CTk):
         def worker() -> None:
             answer = self.assistant.explain_code_file(relative, source, question)
             def deliver() -> None:
-                self._append_chat("JARVIS", f"Code analysis: {relative}\n\n{answer}")
-                self._set_overlay_response(f"JARVIS: Code analysis complete for {relative}.")
+                self._append_chat("ATLAS", f"Code analysis: {relative}\n\n{answer}")
+                self._set_overlay_response(f"ATLAS: Code analysis complete for {relative}.")
                 self._set_status("Online")
                 self._set_command_status(f"Analysis complete: {relative}")
             self.after(0, deliver)
@@ -7622,7 +7660,7 @@ class JarvisApp(ctk.CTk):
                 success = bool(result.get("ok"))
                 message = f"{result.get('label', runner_id)} {'passed' if success else 'failed'} in {result.get('duration', 0)} seconds."
                 self.assistant.record_action("run_code_check", {"project": str(root), "runner": runner_id}, risk, success, message, verified=True)
-                self._append_chat("JARVIS", message)
+                self._append_chat("ATLAS", message)
                 self._set_status("Online")
                 self._set_command_status(message)
             self.after(0, deliver)
@@ -7655,7 +7693,7 @@ class JarvisApp(ctk.CTk):
                 self.assistant.last_action = "Code diagnostics"
                 self.assistant.last_risk = "safe"
                 self.assistant.record_action("diagnose_code_project", {"project": str(root)}, "safe", True, f"Scanned {report.get('file_count', 0)} files; found {issue_count} issues.", verified=True)
-                self._append_chat("JARVIS", f"Diagnostics complete for {root.name}. I scanned {report.get('file_count', 0)} source files and found {issue_count} issue{'s' if issue_count != 1 else ''} in the supported checks.")
+                self._append_chat("ATLAS", f"Diagnostics complete for {root.name}. I scanned {report.get('file_count', 0)} source files and found {issue_count} issue{'s' if issue_count != 1 else ''} in the supported checks.")
                 self._set_status("Online")
                 self._set_command_status(f"Diagnostics complete: {issue_count} issues")
             self.after(0, deliver)
@@ -7739,7 +7777,7 @@ class JarvisApp(ctk.CTk):
                     self.code_preview_box.see("1.0")
                 self._set_code_edit_buttons(True)
                 summary = str(self.code_pending_edit["summary"])
-                self._append_chat("JARVIS", f"Edit proposed for {relative}: {summary}\nReview the diff, then choose Apply or Discard.")
+                self._append_chat("ATLAS", f"Edit proposed for {relative}: {summary}\nReview the diff, then choose Apply or Discard.")
                 self._set_command_status(f"Edit ready for review: {relative}")
             self.after(0, deliver)
 
@@ -7760,11 +7798,11 @@ class JarvisApp(ctk.CTk):
             return
         backup_root = root / ".jarvis_backups"
         if not backup_root.exists() or backup_root.is_symlink():
-            self._append_chat("System", "No safe JARVIS backup folder exists for this file.")
+            self._append_chat("System", "No safe ATLAS backup folder exists for this file.")
             return
         backup_base = backup_root / safe_path.relative_to(root)
         if not backup_base.parent.exists():
-            self._append_chat("System", "No JARVIS backup exists for this file yet.")
+            self._append_chat("System", "No ATLAS backup exists for this file yet.")
             return
         candidates: list[Path] = []
         for item in backup_base.parent.glob(f"{backup_base.name}.*.bak"):
@@ -7776,7 +7814,7 @@ class JarvisApp(ctk.CTk):
                 continue
         candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
         if not candidates:
-            self._append_chat("System", "No JARVIS backup exists for this file yet.")
+            self._append_chat("System", "No ATLAS backup exists for this file yet.")
             return
         backup_path = candidates[0]
         try:
@@ -7818,7 +7856,7 @@ class JarvisApp(ctk.CTk):
             self.code_preview_box.configure(state="disabled")
             self.code_preview_box.see("1.0")
         self._set_code_edit_buttons(True)
-        self._append_chat("JARVIS", f"Latest backup prepared for {relative}. Review the restoration diff, then choose Apply or Discard.")
+        self._append_chat("ATLAS", f"Latest backup prepared for {relative}. Review the restoration diff, then choose Apply or Discard.")
         self._set_command_status(f"Backup ready for review: {relative}")
     def _discard_pending_code_edit(self, announce: bool = True) -> None:
         had_proposal = self.code_pending_edit is not None
@@ -7874,7 +7912,7 @@ class JarvisApp(ctk.CTk):
         self._select_coding_file(safe_path)
         message = f"Applied edit to {relative}. Backup: {backup_path}. {summary}"
         self.assistant.record_action("edit_code_file", {"file": relative, "backup": str(backup_path)}, "medium", True, message, verified=True)
-        self._append_chat("JARVIS", f"Task complete. Updated {relative}. A backup was saved before the change.")
+        self._append_chat("ATLAS", f"Task complete. Updated {relative}. A backup was saved before the change.")
         self._set_command_status(f"Edit applied: {relative}")
     def _update_core_responsive_layout(self, _event: Any | None = None) -> None:
         body = self.core_body_frame
@@ -8357,7 +8395,7 @@ class JarvisApp(ctk.CTk):
 
         window = ctk.CTkToplevel(self)
         self.floating_panels[key] = window
-        window.title(f"JARVIS - {title}")
+        window.title(f"ATLAS - {title}")
         self._apply_window_icon(window)
         window.geometry("340x150+180+180")
         window.minsize(280, 120)
@@ -8804,8 +8842,8 @@ class JarvisApp(ctk.CTk):
         user_name = str(self.assistant.personality.get("user_name") or "there")
         message = f"Hello, {user_name}. Nice to see you."
         self.gesture_status_var.set("Wave recognized. Greeting delivered.")
-        self._append_chat("JARVIS", message)
-        self._set_overlay_response(f"JARVIS: {message}")
+        self._append_chat("ATLAS", message)
+        self._set_overlay_response(f"ATLAS: {message}")
         self._set_command_status("Gesture: wave recognized")
         self.assistant.record_action("webcam_wave", {}, "safe", True, message, verified=True)
         if self.voice_enabled_var.get() and self.assistant.settings.get("webcam_wave_speaks", True):
@@ -9066,7 +9104,7 @@ class JarvisApp(ctk.CTk):
         ).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         ctk.CTkLabel(
             window,
-            text="Run saved multi-step workflows through JARVIS' approved command router. Risky steps still stop for confirmation.",
+            text="Run saved multi-step workflows through ATLAS' approved command router. Risky steps still stop for confirmation.",
             text_color="#d9f7ff",
             anchor="w",
             justify="left",
@@ -9150,10 +9188,10 @@ class JarvisApp(ctk.CTk):
         raw_steps = steps_entry.get().strip()
         steps = [step.strip() for step in raw_steps.split(";") if step.strip()]
         if not name:
-            messagebox.showerror("JARVIS", "Give the mission a name first.")
+            messagebox.showerror("ATLAS", "Give the mission a name first.")
             return
         if not steps:
-            messagebox.showerror("JARVIS", "Add at least one semicolon-separated command.")
+            messagebox.showerror("ATLAS", "Add at least one semicolon-separated command.")
             return
         templates = [template for template in self._mission_templates() if str(template.get("name", "")).lower() != name.lower()]
         templates.append({"name": name[:80], "description": "Custom mission.", "steps": steps[:12]})
@@ -9195,7 +9233,7 @@ class JarvisApp(ctk.CTk):
                     break
                 self._append_chat("System", f"Mission step {index}/{len(steps)}: {step}")
                 role, response = self.assistant.handle_command(step)
-                speaker = "JARVIS" if role in {"assistant", "action"} else "System"
+                speaker = "ATLAS" if role in {"assistant", "action"} else "System"
                 self._append_chat(speaker, response)
                 summary.append(f"{index}. {step} -> {response[:120]}")
                 if self.assistant.pending_confirmation is not None:
@@ -9252,7 +9290,7 @@ class JarvisApp(ctk.CTk):
 
         buttons = [
             ("Apps", self.open_app_whitelist_window),
-            ("JARVIS Music", self.open_local_music_player_panel),
+            ("ATLAS Music", self.open_local_music_player_panel),
             ("Music Settings", self.open_music_window),
             ("Memory", self.open_memory_window),
             ("Mic", self.open_microphone_window),
@@ -9316,7 +9354,7 @@ class JarvisApp(ctk.CTk):
         home_path = DATA_DIR / "jarvis_engine_home.html"
         home_html = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JARVIS Engine</title><style>
+<title>ATLAS Engine</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#030712;color:#e6fbff;
 font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;overflow:hidden}.grid{position:fixed;inset:0;
 background-image:linear-gradient(#12384f55 1px,transparent 1px),linear-gradient(90deg,#12384f55 1px,transparent 1px);
@@ -9334,9 +9372,9 @@ background:#1d5f7a;color:white;font-weight:700;padding:0 24px;cursor:pointer}.li
 gap:10px;flex-wrap:wrap;margin-top:22px}.links a{color:#76e4ff;text-decoration:none;border:1px solid #12384f;background:#07111f;
 padding:9px 14px}.links a:hover{border-color:#76e4ff}.status{margin-top:28px;color:#70f0bf;font-size:12px;letter-spacing:2px}
 </style></head><body><div class="grid"></div><main class="core"><div class="rings"></div><div class="eyebrow">SYSTEM ONLINE</div>
-<h1>JARVIS ENGINE</h1><p class="sub">Browse the web. I shall handle the dramatic lighting.</p>
+<h1>ATLAS ENGINE</h1><p class="sub">Browse the web. I shall handle the dramatic lighting.</p>
 <form class="search" action="https://www.google.com/search" method="get"><input name="q" autofocus autocomplete="off"
-placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH</button></form>
+placeholder="Search the web with ATLAS Engine..."><button type="submit">SEARCH</button></form>
 <nav class="links"><a href="https://news.google.com">News</a><a href="https://www.youtube.com">YouTube</a>
 <a href="https://docs.google.com">Google Docs</a><a href="https://github.com">GitHub</a><a href="https://www.google.com/maps">Maps</a></nav>
 <div class="status">CHROMIUM CORE READY</div></main></body></html>"""
@@ -9356,7 +9394,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
             return
         edge = self._edge_executable()
         if edge is None:
-            self.browser_status_var.set("Microsoft Edge is required for JARVIS Engine.")
+            self.browser_status_var.set("Microsoft Edge is required for ATLAS Engine.")
             return
         home_path = self._ensure_browser_home_page()
         self.browser_home_url = home_path.as_uri()
@@ -9380,7 +9418,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
         try:
             self.browser_process = subprocess.Popen(command)
         except Exception as exc:
-            self.browser_status_var.set(f"JARVIS Engine failed to start: {exc}")
+            self.browser_status_var.set(f"ATLAS Engine failed to start: {exc}")
             return
         self.browser_status_var.set("Starting Chromium core...")
         threading.Thread(target=self._wait_for_browser_window, args=(profile,), daemon=True).start()
@@ -9420,7 +9458,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
 
             ctypes.windll.user32.EnumWindows(enum_callback, 0)
             if candidates:
-                named = [item for item in candidates if "jarvis engine" in item[2].lower()]
+                named = [item for item in candidates if any(name in item[2].lower() for name in ["atlas engine", "jarvis engine"])]
                 chosen = max(named or candidates, key=lambda item: item[1])
                 best_hwnd = chosen[0]
                 if named or time.monotonic() + 3 >= deadline:
@@ -9459,7 +9497,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
         user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0020 | 0x0004 | 0x0002 | 0x0001)
         user32.ShowWindow(hwnd, 5)
         self.browser_hwnd = hwnd
-        self.browser_status_var.set("JARVIS Engine online | Full Chromium browser")
+        self.browser_status_var.set("ATLAS Engine online | Full Chromium browser")
         self._resize_embedded_browser()
         self._schedule_browser_focus_watch()
 
@@ -9573,7 +9611,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
         def worker() -> None:
             target = self._browser_target()
             if target is None or websockets is None:
-                self.after(0, lambda: self.browser_status_var.set("Use the browser's native controls while the JARVIS link reconnects."))
+                self.after(0, lambda: self.browser_status_var.set("Use the browser's native controls while the ATLAS link reconnects."))
                 return
 
             async def send_command() -> None:
@@ -9615,7 +9653,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
         if not self.browser_home_url:
             self.browser_home_url = self._ensure_browser_home_page().as_uri()
         self.browser_address_var.set(self.browser_home_url)
-        self._browser_command("Page.navigate", {"url": self.browser_home_url}, "JARVIS Engine home")
+        self._browser_command("Page.navigate", {"url": self.browser_home_url}, "ATLAS Engine home")
 
     def _browser_history(self, direction: str) -> None:
         expression = "history.back()" if direction == "back" else "history.forward()"
@@ -9633,6 +9671,45 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
             str(DATA_DIR / "jarvis_engine_profile").lower(),
             str(DATA_DIR / "jarvis_video_profile").lower(),
         }
+
+    def _refresh_atlas_launcher_install(self) -> None:
+        if not getattr(sys, "frozen", False):
+            return
+        bundled_launcher = BASE_DIR / "JARVIS Launcher.exe"
+        if not bundled_launcher.is_file():
+            return
+        managed_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / "JARVIS Launcher"
+        managed_launcher = managed_dir / "JARVIS Launcher.exe"
+        managed_dir.mkdir(parents=True, exist_ok=True)
+        copied = False
+        for _attempt in range(8):
+            try:
+                if bundled_launcher.resolve() != managed_launcher.resolve():
+                    shutil.copy2(bundled_launcher, managed_launcher)
+                copied = True
+                break
+            except OSError:
+                time.sleep(0.75)
+        if not copied:
+            return
+        try:
+            import win32com.client
+
+            shell = win32com.client.Dispatch("WScript.Shell")
+            shortcut_locations = [
+                Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop" / "ATLAS Launcher.lnk",
+                Path(os.environ.get("APPDATA", str(Path.home()))) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "ATLAS Launcher.lnk",
+            ]
+            for shortcut_path in shortcut_locations:
+                shortcut_path.parent.mkdir(parents=True, exist_ok=True)
+                shortcut = shell.CreateShortcut(str(shortcut_path))
+                shortcut.TargetPath = str(managed_launcher)
+                shortcut.WorkingDirectory = str(managed_launcher.parent)
+                shortcut.IconLocation = f"{managed_launcher},0"
+                shortcut.Description = "Launch and update ATLAS"
+                shortcut.Save()
+        except Exception:
+            return
         self.browser_hwnd = 0
         self.video_player_hwnd = 0
         for process in psutil.process_iter(["pid", "cmdline"]):
@@ -9739,7 +9816,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
             return
         video_id = self._youtube_video_id(self.current_video_url)
         if not video_id:
-            self.video_player_status_var.set("This source cannot be embedded. Opening it in JARVIS Engine.")
+            self.video_player_status_var.set("This source cannot be embedded. Opening it in ATLAS Engine.")
             self.open_browser_panel()
             self.browser_address_var.set(self.current_video_url)
             self.after(400, self._browser_go)
@@ -9774,7 +9851,7 @@ placeholder="Search the web with JARVIS Engine..."><button type="submit">SEARCH<
             return
         player_path = DATA_DIR / "jarvis_video_player.html"
         player_html = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JARVIS Video Player</title><style>html,body,#player{width:100%;height:100%;margin:0;background:#000;overflow:hidden}
+<title>ATLAS Video Player</title><style>html,body,#player{width:100%;height:100%;margin:0;background:#000;overflow:hidden}
 body{font-family:Segoe UI,Arial,sans-serif}.error{display:grid;place-items:center;color:#76e4ff;height:100%;text-align:center}</style></head>
 <body><div id="player"></div><script>
 const id=new URLSearchParams(location.search).get('video');
@@ -9862,7 +9939,7 @@ document.getElementById('player').appendChild(frame);}
 
             ctypes.windll.user32.EnumWindows(enum_callback, 0)
             if candidates:
-                named = [item for item in candidates if "jarvis video player" in item[2].lower()]
+                named = [item for item in candidates if any(name in item[2].lower() for name in ["atlas video player", "jarvis video player"])]
                 chosen = max(named or candidates, key=lambda item: item[1])
                 best_hwnd = chosen[0]
                 if named or time.monotonic() + 3 >= deadline:
@@ -9901,7 +9978,7 @@ document.getElementById('player').appendChild(frame);}
         user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0020 | 0x0004 | 0x0002 | 0x0001)
         user32.ShowWindow(hwnd, 5)
         self.video_player_hwnd = hwnd
-        self.video_player_status_var.set("Playing inside JARVIS")
+        self.video_player_status_var.set("Playing inside ATLAS")
         self._resize_embedded_video_player()
         self._schedule_browser_focus_watch()
 
@@ -9938,7 +10015,7 @@ document.getElementById('player').appendChild(frame);}
                                 return
 
                 asyncio.run(navigate())
-                self.after(0, lambda: self.video_player_status_var.set("Playing inside JARVIS"))
+                self.after(0, lambda: self.video_player_status_var.set("Playing inside ATLAS"))
             except Exception as exc:
                 self.after(0, lambda: self.video_player_status_var.set(f"Player navigation failed: {exc}"))
 
@@ -10032,7 +10109,7 @@ document.getElementById('player').appendChild(frame);}
         self.article_title_var.set(title)
         self.article_meta_var.set(source if not published else f"{source} | {published}")
         self.article_status_var.set("Loading readable article...")
-        self._set_article_text("JARVIS is retrieving the article. One moment.")
+        self._set_article_text("ATLAS is retrieving the article. One moment.")
         self._set_command_center_panel_visible("article", True)
         self._set_command_status(f"Reading: {title[:48]}")
 
@@ -10089,17 +10166,17 @@ document.getElementById('player').appendChild(frame);}
         message = "Running in the background. Ctrl+Alt+J brings up the overlay if the hotkey is available."
         self._append_chat("System", message)
         if source == "overlay":
-            self._set_overlay_response(f"JARVIS: {message}")
+            self._set_overlay_response(f"ATLAS: {message}")
         self._set_command_status("Background mode active")
         self.assistant.record_action("run_in_background", {}, "safe", True, message, verified=True)
         self.after(350, self.withdraw)
 
     def turn_off_all_instances(self, source: str = "main") -> None:
-        message = "Shutting down all JARVIS instances. Finally, a little peace and quiet."
+        message = "Shutting down all ATLAS instances. Finally, a little peace and quiet."
         self._append_chat("System", message)
         if source == "overlay":
-            self._set_overlay_response(f"JARVIS: {message}")
-        self._set_command_status("Shutting down JARVIS...")
+            self._set_overlay_response(f"ATLAS: {message}")
+        self._set_command_status("Shutting down ATLAS...")
         self.assistant.record_action("turn_off_jarvis", {}, "safe", True, message, verified=True)
         threading.Thread(target=self._terminate_other_jarvis_instances, daemon=True).start()
         self.after(450, self._on_close)
@@ -10114,7 +10191,7 @@ document.getElementById('player').appendChild(frame);}
                 name = str(proc.info.get("name") or "").lower()
                 exe = str(proc.info.get("exe") or "").lower()
                 cmdline = " ".join(str(part).lower() for part in (proc.info.get("cmdline") or []))
-                looks_like_packaged_app = "jarvis desktop assistant" in name or "jarvis desktop assistant" in exe
+                looks_like_packaged_app = any(label in name or label in exe for label in ["jarvis desktop assistant", "atlas desktop assistant"])
                 looks_like_this_exe = bool(current_exe and exe == current_exe)
                 looks_like_script = "jarvis.py" in cmdline and "python" in name
                 if looks_like_packaged_app or looks_like_this_exe or looks_like_script:
@@ -10125,7 +10202,7 @@ document.getElementById('player').appendChild(frame);}
     def _create_overlay(self) -> None:
         window = ctk.CTkToplevel(self)
         self.overlay_window = window
-        window.title("J.A.R.V.I.S. Overlay")
+        window.title("A.T.L.A.S. Overlay")
         self._apply_window_icon(window)
         window.geometry("560x240+80+80")
         window.minsize(460, 210)
@@ -10140,7 +10217,7 @@ document.getElementById('player').appendChild(frame);}
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             header,
-            text="J.A.R.V.I.S.",
+            text="A.T.L.A.S.",
             font=ctk.CTkFont(size=16, weight="bold"),
             text_color="#8be9ff",
         ).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 2))
@@ -10157,7 +10234,7 @@ document.getElementById('player').appendChild(frame);}
         body.grid(row=1, column=0, sticky="nsew")
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(1, weight=1)
-        self.overlay_entry = ctk.CTkEntry(body, placeholder_text="Type to JARVIS...", height=38)
+        self.overlay_entry = ctk.CTkEntry(body, placeholder_text="Type to ATLAS...", height=38)
         self.overlay_entry.grid(row=0, column=0, sticky="ew", padx=(12, 6), pady=(12, 6))
         self.overlay_entry.bind("<Return>", lambda _event: self.send_overlay_text())
         ctk.CTkButton(body, text="Send", width=72, command=self.send_overlay_text).grid(row=0, column=1, padx=6, pady=(12, 6))
@@ -10171,7 +10248,7 @@ document.getElementById('player').appendChild(frame);}
             text_color="#d9f7ff",
         )
         self.overlay_response_box.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=12, pady=(0, 12))
-        self.overlay_response_box.insert("1.0", "JARVIS: Ready.")
+        self.overlay_response_box.insert("1.0", "ATLAS: Ready.")
         self.overlay_response_box.configure(state="disabled")
 
     def _set_overlay_response(self, text: str) -> None:
@@ -10400,7 +10477,7 @@ document.getElementById('player').appendChild(frame);}
     def _add_watch_folder_from_window(self, folder_entry: ctk.CTkEntry, list_frame: ctk.CTkScrollableFrame) -> None:
         path = normalize_watch_folder(folder_entry.get())
         if path is None:
-            messagebox.showerror("JARVIS", "Choose a real folder first.")
+            messagebox.showerror("ATLAS", "Choose a real folder first.")
             return
         folders = [str(folder) for folder in self.assistant.settings.get("project_watch_folders", [])]
         if str(path) not in folders:
@@ -10445,7 +10522,7 @@ document.getElementById('player').appendChild(frame);}
 
     def open_memory_window(self) -> None:
         window = ctk.CTkToplevel(self)
-        window.title("JARVIS Memories")
+        window.title("ATLAS Memories")
         self._apply_window_icon(window)
         window.geometry("640x520")
         window.minsize(540, 420)
@@ -10588,13 +10665,13 @@ document.getElementById('player').appendChild(frame);}
 
     def _import_local_music_files(self) -> None:
         paths = filedialog.askopenfilenames(
-            title="Add songs to JARVIS Music",
+            title="Add songs to ATLAS Music",
             filetypes=[("Audio files", "*.mp3 *.wav *.ogg *.flac *.m4a *.aac"), ("All files", "*.*")],
         )
         self._add_local_music_paths(list(paths))
 
     def _import_local_music_folder(self) -> None:
-        folder = filedialog.askdirectory(title="Add a music folder to JARVIS Music")
+        folder = filedialog.askdirectory(title="Add a music folder to ATLAS Music")
         if not folder:
             return
         self._set_command_status("Scanning music folder...")
@@ -10608,7 +10685,7 @@ document.getElementById('player').appendChild(frame);}
         save_settings(self.assistant.settings)
         self._refresh_local_music_panel()
         added = len(combined) - len(before)
-        message = f"Added {added} song{'s' if added != 1 else ''} to JARVIS Music."
+        message = f"Added {added} song{'s' if added != 1 else ''} to ATLAS Music."
         self._append_chat("System", message)
         self._set_command_status(message)
 
@@ -10621,7 +10698,7 @@ document.getElementById('player').appendChild(frame);}
     def _play_selected_local_music(self) -> None:
         selected = self._selected_local_music_paths()
         if not selected:
-            self._append_chat("System", "Select one or more songs in the JARVIS Music library first.")
+            self._append_chat("System", "Select one or more songs in the ATLAS Music library first.")
             return
         self._play_local_music_queue(selected)
 
@@ -10630,7 +10707,7 @@ document.getElementById('player').appendChild(frame);}
         if ok:
             self.local_music_now_var.set(detail)
             self.local_music_state_var.set(f"Playing {self.local_music_player.index + 1} of {len(self.local_music_player.queue)}")
-            self.music_var.set(f"JARVIS Music: {detail}")
+            self.music_var.set(f"ATLAS Music: {detail}")
             self._set_command_status(f"Playing {detail}")
         else:
             self.local_music_state_var.set(detail)
@@ -10642,7 +10719,7 @@ document.getElementById('player').appendChild(frame);}
         if not selected:
             self._append_chat("System", "Select the songs for the new playlist first.")
             return
-        name = simpledialog.askstring("New JARVIS Playlist", "Playlist name:", parent=self)
+        name = simpledialog.askstring("New ATLAS Playlist", "Playlist name:", parent=self)
         if not name or not name.strip():
             return
         name = name.strip()[:80]
@@ -10665,7 +10742,7 @@ document.getElementById('player').appendChild(frame);}
     def _play_selected_local_playlist(self) -> None:
         name = self._selected_local_playlist_name()
         if not name:
-            self._append_chat("System", "Select a JARVIS Music playlist first.")
+            self._append_chat("System", "Select a ATLAS Music playlist first.")
             return
         self._play_named_local_music(name)
 
@@ -10684,8 +10761,8 @@ document.getElementById('player').appendChild(frame);}
         if exact_song:
             index = library.index(exact_song)
             ok, detail = self._play_local_music_queue(library, start_index=index)
-            return ok, f"Playing '{Path(exact_song).stem}' in JARVIS Music." if ok else detail
-        return False, f"I could not find one unambiguous song or playlist named '{query}' in JARVIS Music."
+            return ok, f"Playing '{Path(exact_song).stem}' in ATLAS Music." if ok else detail
+        return False, f"I could not find one unambiguous song or playlist named '{query}' in ATLAS Music."
 
     def _delete_selected_local_playlist(self) -> None:
         name = self._selected_local_playlist_name()
@@ -10717,7 +10794,7 @@ document.getElementById('player').appendChild(frame);}
             self.assistant.settings["local_music_startup_enabled"] = False
         save_settings(self.assistant.settings)
         self._refresh_local_music_panel()
-        self._append_chat("System", f"Removed {len(selected)} song{'s' if len(selected) != 1 else ''} from JARVIS Music. The files were not deleted.")
+        self._append_chat("System", f"Removed {len(selected)} song{'s' if len(selected) != 1 else ''} from ATLAS Music. The files were not deleted.")
 
     def _set_local_music_startup_choice(self, label: str) -> None:
         choice_type, value = self.music_startup_lookup.get(label, ("off", ""))
@@ -10761,7 +10838,7 @@ document.getElementById('player').appendChild(frame);}
         if ok:
             self.local_music_now_var.set(detail)
             self.local_music_state_var.set(f"Playing {self.local_music_player.index + 1} of {len(self.local_music_player.queue)}")
-            self.music_var.set(f"JARVIS Music: {detail}")
+            self.music_var.set(f"ATLAS Music: {detail}")
         else:
             self.local_music_state_var.set(detail)
 
@@ -10770,7 +10847,7 @@ document.getElementById('player').appendChild(frame);}
         if ok:
             self.local_music_now_var.set(detail)
             self.local_music_state_var.set(f"Playing {self.local_music_player.index + 1} of {len(self.local_music_player.queue)}")
-            self.music_var.set(f"JARVIS Music: {detail}")
+            self.music_var.set(f"ATLAS Music: {detail}")
         else:
             self.local_music_state_var.set(detail)
 
@@ -10837,7 +10914,7 @@ document.getElementById('player').appendChild(frame);}
         final_message = f"{message} {count} items available for {profile.get('name', 'your account')}."
         self.spotify_status_var.set(final_message)
         self._set_command_status(final_message)
-        self._append_chat("JARVIS", final_message)
+        self._append_chat("ATLAS", final_message)
 
     def _spotify_sync_failed(self, error: str) -> None:
         message = f"Spotify sync failed: {error}"
@@ -10846,7 +10923,7 @@ document.getElementById('player').appendChild(frame);}
         self._append_chat("System", message)
 
     def _disconnect_spotify_library(self) -> None:
-        if not messagebox.askyesno("Disconnect Spotify", "Remove this Windows user's encrypted Spotify connection from JARVIS?", parent=self):
+        if not messagebox.askyesno("Disconnect Spotify", "Remove this Windows user's encrypted Spotify connection from ATLAS?", parent=self):
             return
         try:
             self._spotify_client().disconnect()
@@ -10895,14 +10972,14 @@ document.getElementById('player').appendChild(frame);}
         webbrowser.open(target)
         self.music_var.set(f"Spotify: {row['name']}")
         self.spotify_status_var.set(f"Opened {row['kind'].lower()}: {row['name']}")
-        self._append_chat("JARVIS", f"Opening {row['name']} in Spotify. Direct and refreshingly unambiguous.")
+        self._append_chat("ATLAS", f"Opening {row['name']} in Spotify. Direct and refreshingly unambiguous.")
 
     def _play_synced_spotify_item(self, query: str) -> tuple[bool, str]:
         wanted = _normalized_music_label(query)
         exact = [row for row in self._spotify_rows if _normalized_music_label(row.get("name", "")) == wanted]
         matches = exact or [row for row in self._spotify_rows if wanted and wanted in _normalized_music_label(row.get("name", ""))]
         if len(matches) != 1:
-            return False, f"I found {len(matches)} synced Spotify matches for '{query}'. Open JARVIS Music to choose one."
+            return False, f"I found {len(matches)} synced Spotify matches for '{query}'. Open ATLAS Music to choose one."
         row = matches[0]
         webbrowser.open(row.get("uri") or row.get("url"))
         self.music_var.set(f"Spotify: {row['name']}")
@@ -10910,7 +10987,7 @@ document.getElementById('player').appendChild(frame);}
 
     def open_music_window(self) -> None:
         window = ctk.CTkToplevel(self)
-        window.title("JARVIS Music")
+        window.title("ATLAS Music")
         self._apply_window_icon(window)
         window.geometry("680x620")
         window.minsize(600, 520)
@@ -10929,7 +11006,7 @@ document.getElementById('player').appendChild(frame);}
         header.grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         note = ctk.CTkLabel(
             window,
-            text="Tune how JARVIS searches, selects, and plays music. Exact playback still depends on what Apple Music exposes to Windows.",
+            text="Tune how ATLAS searches, selects, and plays music. Exact playback still depends on what Apple Music exposes to Windows.",
             text_color="#d9f7ff",
             anchor="w",
             justify="left",
@@ -11028,7 +11105,7 @@ document.getElementById('player').appendChild(frame);}
         try:
             seconds = float(wait_entry.get().strip())
         except ValueError:
-            messagebox.showerror("JARVIS", "Use a number of seconds. Even music requires time to obey physics.")
+            messagebox.showerror("ATLAS", "Use a number of seconds. Even music requires time to obey physics.")
             return
         self.assistant.settings["apple_music_result_wait_seconds"] = max(1, min(10, seconds))
         save_settings(self.assistant.settings)
@@ -11070,7 +11147,7 @@ document.getElementById('player').appendChild(frame);}
 
     def open_integrations_window(self) -> None:
         window = ctk.CTkToplevel(self)
-        window.title("JARVIS Integrations")
+        window.title("ATLAS Integrations")
         self._apply_window_icon(window)
         window.geometry("820x680")
         window.minsize(700, 540)
@@ -11089,7 +11166,7 @@ document.getElementById('player').appendChild(frame);}
         header.grid(row=0, column=0, sticky="w", padx=18, pady=(18, 4))
         note = ctk.CTkLabel(
             window,
-            text="Enable free integrations here. API keys and tokens stay in .env; JARVIS will only show whether they are loaded.",
+            text="Enable free integrations here. API keys and tokens stay in .env; ATLAS will only show whether they are loaded.",
             text_color="#d9f7ff",
             anchor="w",
             justify="left",
@@ -11357,12 +11434,12 @@ document.getElementById('player').appendChild(frame);}
         aliases = [alias.strip() for alias in alias_entry.get().split(",") if alias.strip()]
 
         if not name:
-            messagebox.showerror("JARVIS", "Give the app a name first.")
+            messagebox.showerror("ATLAS", "Give the app a name first.")
             return
 
         path = Path(app_path)
         if not path.exists() or path.suffix.lower() not in {".exe", ".lnk"}:
-            messagebox.showerror("JARVIS", "Choose a real .exe or .lnk file. I know, security is terribly inconvenient.")
+            messagebox.showerror("ATLAS", "Choose a real .exe or .lnk file. I know, security is terribly inconvenient.")
             return
 
         custom_apps = list(self.assistant.settings.get("custom_whitelisted_apps", []))
@@ -11423,10 +11500,10 @@ document.getElementById('player').appendChild(frame);}
         name = name_entry.get().strip()
         app_id = app_id_entry.get().strip()
         if not name:
-            messagebox.showerror("JARVIS", "Give the Steam game a name first.")
+            messagebox.showerror("ATLAS", "Give the Steam game a name first.")
             return
         if not app_id.isdigit():
-            messagebox.showerror("JARVIS", "Steam App IDs are numbers only. Tedious, but wonderfully unambiguous.")
+            messagebox.showerror("ATLAS", "Steam App IDs are numbers only. Tedious, but wonderfully unambiguous.")
             return
 
         steam_games = dict(self.assistant.settings.get("steam_games", {}))
@@ -11450,7 +11527,7 @@ document.getElementById('player').appendChild(frame);}
         added_count, imported = import_steam_library(self.assistant.settings)
         self._refresh_steam_games_list(list_frame)
         if not imported:
-            messagebox.showinfo("JARVIS", "I couldn't find installed Steam game manifests.")
+            messagebox.showinfo("ATLAS", "I couldn't find installed Steam game manifests.")
             return
         self._append_chat(
             "System",
@@ -11557,11 +11634,11 @@ document.getElementById('player').appendChild(frame);}
         canvas.create_oval(center_x - 36, center_y - 36, center_x + 36, center_y + 36, fill="#031523", outline="#8be9ff", width=2)
         canvas.create_oval(center_x - 12, center_y - 12, center_x + 12, center_y + 12, fill="#27d8ff", outline="#d9f7ff", width=1)
 
-        canvas.create_text(center_x, 96, text="J.A.R.V.I.S.", fill="#c8f6ff", font=("Segoe UI", 44, "bold"))
-        canvas.create_text(center_x, 142, text="SYSTEM BOOT SEQUENCE", fill="#32d3ff", font=("Segoe UI", 13, "bold"))
+        canvas.create_text(center_x, 96, text="A.T.L.A.S.", fill="#c8f6ff", font=("Segoe UI", 44, "bold"))
+        canvas.create_text(center_x, 142, text="ADAPTIVE TASK, LEARNING & AUTOMATION SYSTEM", fill="#32d3ff", font=("Segoe UI", 12, "bold"))
 
         status_messages = [
-            "Initializing J.A.R.V.I.S.",
+            "Initializing A.T.L.A.S.",
             "Voice system online",
             "Vision system online",
             "Mouse control set to safe mode",
@@ -11615,12 +11692,12 @@ document.getElementById('player').appendChild(frame);}
             self._enable_layout_autosave()
             return
         dialog = ctk.CTkInputDialog(
-            text="What should JARVIS call you?",
-            title="JARVIS User Setup",
+            text="What should ATLAS call you?",
+            title="ATLAS User Setup",
         )
         entered = dialog.get_input()
         if entered is None:
-            self._append_chat("System", "User setup is incomplete. JARVIS will ask again next time.")
+            self._append_chat("System", "User setup is incomplete. ATLAS will ask again next time.")
             self._enable_layout_autosave()
             return
         user_name = re.sub(r"[^A-Za-z0-9 ._'-]", "", entered).strip()[:40] or "Sir"
@@ -11630,7 +11707,7 @@ document.getElementById('player').appendChild(frame);}
         self.assistant.personality["startup_greeting_name"] = user_name
         save_settings(self.assistant.settings)
         save_personality(self.assistant.personality)
-        self._append_chat("JARVIS", f"Identity profile configured. Welcome, {user_name}.")
+        self._append_chat("ATLAS", f"Identity profile configured. Welcome, {user_name}.")
         self._enable_layout_autosave()
 
     def _draw_orb(self, radius: int) -> None:
@@ -11721,7 +11798,7 @@ document.getElementById('player').appendChild(frame);}
         self.wake_enabled_var.set(True)
         self._wake_thread = threading.Thread(target=self._wake_listener_worker, daemon=True)
         self._wake_thread.start()
-        wake = str(self.assistant.settings.get("wake_phrase", "jarvis")).title()
+        wake = str(self.assistant.settings.get("wake_phrase", "atlas")).title()
         self._set_mic_status(f"Wake ready: {wake}")
         self._set_command_status(f"Wake listening enabled for '{wake}'")
 
@@ -11763,8 +11840,8 @@ document.getElementById('player').appendChild(frame);}
                     continue
                 if not command:
                     self._wake_followup_until = time.monotonic() + 9.0
-                    self._append_chat("You", str(self.assistant.settings.get("wake_phrase", "JARVIS")).upper())
-                    self._append_chat("JARVIS", "Yes?")
+                    self._append_chat("You", str(self.assistant.settings.get("wake_phrase", "ATLAS")).upper())
+                    self._append_chat("ATLAS", "Yes?")
                     if self.voice_enabled_var.get():
                         self.speak("Yes?")
                     continue
@@ -11782,7 +11859,7 @@ document.getElementById('player').appendChild(frame);}
             self._set_mic_status("Ready" if self.voice_backend != "unavailable" else "Unavailable")
 
     def _extract_wake_command(self, text: str) -> tuple[bool, str]:
-        wake = str(self.assistant.settings.get("wake_phrase", "jarvis")).lower().strip()
+        wake = str(self.assistant.settings.get("wake_phrase", "atlas")).lower().strip()
         normalized = re.sub(r"[^a-z0-9' ]+", " ", text.lower())
         normalized = re.sub(r"\s+", " ", normalized).strip()
         if not normalized:
@@ -11792,7 +11869,9 @@ document.getElementById('player').appendChild(frame);}
 
         tokens = normalized.replace("'", " ").split()
         aliases = {wake}
-        if wake == "jarvis":
+        if wake == "atlas":
+            aliases.update({"atlus", "atless", "atlas's"})
+        elif wake == "jarvis":
             aliases.update({"jervis", "charvis", "drivers", "service", "jarvises", "travis"})
         for index, token in enumerate(tokens):
             if index > 1:
@@ -12001,8 +12080,8 @@ document.getElementById('player').appendChild(frame);}
         message = f"Project watcher noticed an error in {path.name}: {error_line}"
 
         def deliver() -> None:
-            self._append_chat("JARVIS", message)
-            self._set_overlay_response(f"JARVIS: {message}")
+            self._append_chat("ATLAS", message)
+            self._set_overlay_response(f"ATLAS: {message}")
             self._set_command_status(f"Project alert: {path.name}")
             if self.voice_enabled_var.get() and self.assistant.settings.get("proactive_speak_alerts", True):
                 self.speak(message)
@@ -12192,8 +12271,8 @@ document.getElementById('player').appendChild(frame);}
         self._last_monitor_alerts[key] = now
 
         def deliver() -> None:
-            self._append_chat("JARVIS", message)
-            self._set_overlay_response(f"JARVIS: {message}")
+            self._append_chat("ATLAS", message)
+            self._set_overlay_response(f"ATLAS: {message}")
             self._set_command_status(f"Alert: {message[:80]}")
             if self.voice_enabled_var.get() and self.assistant.settings.get("proactive_speak_alerts", True):
                 self.speak(message)
@@ -12251,7 +12330,7 @@ document.getElementById('player').appendChild(frame);}
         player = getattr(self, "local_music_player", None)
         if player is not None and player.current_path:
             state = "Paused" if player.paused else "Playing"
-            return f"JARVIS Music {state}: {Path(player.current_path).stem}"
+            return f"ATLAS Music {state}: {Path(player.current_path).stem}"
         apps = detect_music_apps()
         detected = [name.replace("_", " ").title() for name, present in apps.items() if present]
         return ", ".join(detected) if detected else "Browser fallback"
@@ -12267,7 +12346,7 @@ document.getElementById('player').appendChild(frame);}
         self._set_command_status(f"Already on it: {text[:70]}")
         self._append_chat("You", text)
         if source == "overlay":
-            self._set_overlay_response(f"You: {text}\n\nJARVIS: Already on it.")
+            self._set_overlay_response(f"You: {text}\n\nATLAS: Already on it.")
         if self._handle_app_ui_command(text, source):
             return
         threading.Thread(target=self._process_command, args=(text, source), daemon=True).start()
@@ -12299,12 +12378,12 @@ document.getElementById('player').appendChild(frame);}
         )
         if spotify_library_request:
             ok, message = self._play_synced_spotify_item(spotify_library_request.group(1).strip())
-            self._append_chat("JARVIS" if ok else "System", message)
+            self._append_chat("ATLAS" if ok else "System", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         local_player_request = re.search(
-            r"\b(?:play|start)\s+(.+?)\s+(?:in|on|with|through)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b",
+            r"\b(?:play|start)\s+(.+?)\s+(?:in|on|with|through)\s+(?:the\s+)?(?:atlas|jarvis)\s+(?:music\s+)?player\b",
             text,
             re.I,
         )
@@ -12312,18 +12391,18 @@ document.getElementById('player').appendChild(frame);}
             query = re.sub(r"^(?:my\s+)?playlist\s+", "", local_player_request.group(1).strip(), flags=re.I)
             ok, message = self._play_named_local_music(query)
             self.open_local_music_player_panel()
-            self._append_chat("JARVIS" if ok else "System", message)
+            self._append_chat("ATLAS" if ok else "System", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
-        if re.search(r"\b(?:open|show|launch|bring up)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b", lowered):
+        if re.search(r"\b(?:open|show|launch|bring up)\s+(?:the\s+)?(?:atlas|jarvis)\s+(?:music\s+)?player\b", lowered):
             self.open_local_music_player_panel()
-            message = "JARVIS Music is ready. Your library, playlists, and startup selection are all in one panel."
-            self._append_chat("JARVIS", message)
+            message = "ATLAS Music is ready. Your library, playlists, and startup selection are all in one panel."
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
-        local_control = re.search(r"\b(pause|resume|play|stop|next|previous|back)\s+(?:the\s+)?jarvis\s+(?:music\s+)?player\b", lowered)
+        local_control = re.search(r"\b(pause|resume|play|stop|next|previous|back)\s+(?:the\s+)?(?:atlas|jarvis)\s+(?:music\s+)?player\b", lowered)
         if local_control:
             action = local_control.group(1)
             if action in {"pause", "resume", "play"}:
@@ -12341,34 +12420,34 @@ document.getElementById('player').appendChild(frame);}
                 self._local_music_next()
             else:
                 self._local_music_previous()
-            message = f"JARVIS Music: {self.local_music_state_var.get()}."
-            self._append_chat("JARVIS", message)
+            message = f"ATLAS Music: {self.local_music_state_var.get()}."
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:open|show|launch|start)\s+(?:apple\s+)?health\s+(?:bridge|setup|panel)\b", lowered) or re.search(r"\b(?:health|watch)\s+setup\b", lowered):
             self.open_health_bridge_window()
             self._append_chat("System", "Apple Health Bridge setup opened.")
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Apple Health Bridge setup opened.")
+                self._set_overlay_response("ATLAS: Apple Health Bridge setup opened.")
             return True
-        if re.search(r"\b(?:open|show|launch|start)\s+(?:jarvis\s+)?phone\s+(?:bridge|setup|panel)\b", lowered) or re.search(r"\b(?:phone|iphone|mobile)\s+bridge\s+setup\b", lowered):
+        if re.search(r"\b(?:open|show|launch|start)\s+(?:(?:atlas|jarvis)\s+)?phone\s+(?:bridge|setup|panel)\b", lowered) or re.search(r"\b(?:phone|iphone|mobile)\s+bridge\s+setup\b", lowered):
             self.open_phone_bridge_window()
-            self._append_chat("System", "JARVIS Phone Bridge setup opened.")
+            self._append_chat("System", "ATLAS Phone Bridge setup opened.")
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Phone Bridge setup opened.")
+                self._set_overlay_response("ATLAS: Phone Bridge setup opened.")
             return True
         if re.search(r"\b(?:phone|iphone|mobile)\s+bridge\s+(?:status|queue)\b", lowered):
             message = self._latest_phone_status_text()
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:health|heart rate|apple watch|watch)\s+(?:status|reading|readings|update)\b", lowered) or lowered in {"health status", "heart rate", "apple watch status"}:
             message = self._latest_health_status_text()
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:enable|start|turn on|activate)\s+(?:apple\s+)?health\s+bridge\b", lowered):
             set_integration_enabled(self.assistant.settings, "health_bridge", True)
@@ -12376,7 +12455,7 @@ document.getElementById('player').appendChild(frame);}
             message = "Apple Health Bridge enabled. I am listening on the private network."
             self._append_chat("System", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:disable|stop|turn off|deactivate)\s+(?:apple\s+)?health\s+bridge\b", lowered):
             set_integration_enabled(self.assistant.settings, "health_bridge", False)
@@ -12387,7 +12466,7 @@ document.getElementById('player').appendChild(frame);}
             message = "Apple Health Bridge disabled. No health updates will be accepted."
             self._append_chat("System", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         activity_match = re.search(r"\b(?:i am|i'm|im)\s+(exercising|working out|running|walking|resting|sleeping|studying|coding|gaming|driving|outside|stressed|relaxing|doing homework|writing)\b", lowered)
         if activity_match:
@@ -12396,103 +12475,103 @@ document.getElementById('player').appendChild(frame);}
         if any(phrase in lowered for phrase in ["stop talking", "stop speaking", "be quiet", "quiet please", "cancel speech"]):
             self.stop_speaking()
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Speech stopped.")
+                self._set_overlay_response("ATLAS: Speech stopped.")
             return True
         wake_on = any(phrase in lowered for phrase in ["wake word", "wake listening", "always listening", "wake mode"])
         if wake_on and any(verb in lowered for verb in ["enable", "start", "turn on", "activate"]):
             self.wake_enabled_var.set(True)
             self.start_wake_listener()
-            message = f"Wake listening enabled. Say {str(self.assistant.settings.get('wake_phrase', 'Jarvis')).title()} followed by a command."
-            self._append_chat("JARVIS", message)
+            message = f"Wake listening enabled. Say {str(self.assistant.settings.get('wake_phrase', 'Atlas')).title()} followed by a command."
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if wake_on and any(verb in lowered for verb in ["disable", "stop", "turn off", "deactivate"]):
             self.stop_wake_listener()
-            self._append_chat("JARVIS", "Wake listening disabled.")
+            self._append_chat("ATLAS", "Wake listening disabled.")
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Wake listening disabled.")
+                self._set_overlay_response("ATLAS: Wake listening disabled.")
             return True
         if re.search(r"\b(?:run|stay|keep running|go)\s+(?:in\s+)?(?:the\s+)?background\b", lowered) or re.search(
-            r"\b(?:hide|close|minimize)\s+(?:yourself|jarvis|the\s+window)(?:\s+to\s+background)?\b",
+            r"\b(?:hide|close|minimize)\s+(?:yourself|atlas|jarvis|the\s+window)(?:\s+to\s+background)?\b",
             lowered,
         ):
             self.run_in_background(source)
             return True
         if re.search(r"\b(?:turn|shut|power)\s+(?:yourself\s+)?off\b", lowered) or re.search(
-            r"\b(?:quit|exit|close|stop)\s+(?:all\s+)?(?:jarvis|instances|jarvis\s+instances)\b",
+            r"\b(?:quit|exit|close|stop)\s+(?:all\s+)?(?:atlas|jarvis|instances|(?:atlas|jarvis)\s+instances)\b",
             lowered,
         ):
             self.turn_off_all_instances(source)
             return True
-        if re.search(r"\b(?:show|restore|open|bring back)\s+(?:yourself|jarvis|main window|command center)\b", lowered):
+        if re.search(r"\b(?:show|restore|open|bring back)\s+(?:yourself|atlas|jarvis|main window|command center)\b", lowered):
             self.show_main_window()
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Command Center restored.")
+                self._set_overlay_response("ATLAS: Command Center restored.")
             return True
-        browser_search = re.search(r"\b(?:search|look up)\s+(?:the\s+)?(?:web|internet|jarvis engine)\s+(?:for\s+)?(.+)", text, re.IGNORECASE)
+        browser_search = re.search(r"\b(?:search|look up)\s+(?:the\s+)?(?:web|internet|atlas engine|jarvis engine)\s+(?:for\s+)?(.+)", text, re.IGNORECASE)
         if browser_search:
             query = browser_search.group(1).strip()
             self.open_browser_panel()
             self.browser_address_var.set(query)
             self.after(500, self._browser_go)
-            message = f"Searching JARVIS Engine for {query}."
-            self._append_chat("JARVIS", message)
+            message = f"Searching ATLAS Engine for {query}."
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
-        if re.search(r"\b(?:open|show|launch|bring up|start)\s+(?:the\s+)?(?:browser|jarvis engine|web browser)\b", lowered):
+        if re.search(r"\b(?:open|show|launch|bring up|start)\s+(?:the\s+)?(?:browser|atlas engine|jarvis engine|web browser)\b", lowered):
             self.open_browser_panel()
-            message = "JARVIS Engine online. Try not to open forty-seven tabs immediately."
-            self._append_chat("JARVIS", message)
+            message = "ATLAS Engine online. Try not to open forty-seven tabs immediately."
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:open|show|launch|bring up|start)\s+(?:the\s+)?(?:video news|news videos|video headlines|video news panel)\b", lowered):
             self.open_video_news_panel()
             message = "Opening video news. Moving pictures, verified sources, and mercifully no autoplay."
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             self._set_command_status("Video news opened")
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:open|show|launch|bring up|start)\s+(?:the\s+)?(?:news|headlines|news feed|news panel)\b", lowered) or re.search(r"\bwhat(?:'s| is)\s+(?:in\s+)?(?:the\s+)?news\b", lowered):
             self.open_news_panel()
             message = "Opening the news feed. I will try to keep the existential dread neatly formatted."
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             self._set_command_status("News feed opened")
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:start|enable|turn on|activate)\s+(?:the\s+)?(?:webcam|camera|hand)?\s*gestures?\b", lowered):
             self.start_webcam_gestures()
             message = "Webcam gesture control is starting. Wave when you are ready."
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(?:stop|disable|turn off|deactivate)\s+(?:the\s+)?(?:webcam|camera|hand)?\s*gestures?\b", lowered):
             self.stop_webcam_gestures()
             message = "Webcam gesture control disabled."
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         gesture_mode_match = re.search(r"\b(?:set|switch|change)\s+(?:webcam|camera|hand|gesture)?\s*(?:control\s+)?(?:to\s+)?(safe|armed|disabled)(?:\s+mode)?\b", lowered)
         if gesture_mode_match:
             mode = gesture_mode_match.group(1).title()
             self._set_webcam_gesture_mode(mode)
             message = f"Webcam gesture mode set to {mode}."
-            self._append_chat("JARVIS", message)
+            self._append_chat("ATLAS", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return True
         if re.search(r"\b(open|show|launch)\s+(?:webcam\s+|camera\s+|hand\s+)?(gesture|gestures|gesture control|hand control)\b", lowered):
             self.open_gesture_pad_window()
             self._append_chat("System", "Webcam Gesture Control opened.")
             self._set_command_status("Webcam Gesture Control opened")
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Webcam Gesture Control opened.")
+                self._set_overlay_response("ATLAS: Webcam Gesture Control opened.")
             return True
         if re.search(r"\b(?:run|start|perform)\s+(?:code|project|coding)?\s*diagnostics\b", lowered) or re.search(r"\bdiagnose\s+(?:my\s+)?(?:code|project|workspace)\b", lowered):
             self._set_command_center_panel_visible("code", True)
@@ -12516,7 +12595,7 @@ document.getElementById('player').appendChild(frame);}
             self._set_command_center_panel_visible("code", True)
             self._append_chat("System", "Coding Workspace opened in the Command Center.")
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Coding Workspace opened.")
+                self._set_overlay_response("ATLAS: Coding Workspace opened.")
             return True
         if re.search(r"\b(?:close|hide|collapse)\s+(?:the\s+)?(?:coding|code)\s+(?:workspace|helper|panel)\b", lowered):
             self._set_command_center_panel_visible("code", False)
@@ -12526,7 +12605,7 @@ document.getElementById('player').appendChild(frame);}
             self._append_chat("System", "Workspace Layouts opened.")
             self._set_command_status("Workspace Layouts opened")
             if source == "overlay":
-                self._set_overlay_response("JARVIS: Workspace Layouts opened.")
+                self._set_overlay_response("ATLAS: Workspace Layouts opened.")
             return True
         if re.search(r"\b(?:read|review|critique)\s+(?:my\s+)?(?:google\s+doc|doc|document|novel|chapter|draft|manuscript)\b", lowered) or re.search(
             r"\b(?:read it out loud|read this out loud|give feedback on my writing|writing feedback)\b",
@@ -12541,7 +12620,7 @@ document.getElementById('player').appendChild(frame);}
                 if str(layout.get("name", "")).lower() == wanted:
                     self._apply_workspace_layout(layout)
                     if source == "overlay":
-                        self._set_overlay_response(f"JARVIS: Applied {layout.get('name')}.")
+                        self._set_overlay_response(f"ATLAS: Applied {layout.get('name')}.")
                     return True
             self._append_chat("System", f"I could not find the layout {wanted}.")
             return True
@@ -12552,14 +12631,14 @@ document.getElementById('player').appendChild(frame);}
             message = "A document review is already running. One manuscript at a time; civilization depends on it."
             self._append_chat("System", message)
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
             return
         self.document_review_running = True
         self._set_status("Reading Document...")
         self._set_command_status("Preparing document read-through...")
         self._append_chat("System", "Document read-through started. I will try to focus your writing window, copy the text, read it aloud, then give feedback.")
         if source == "overlay":
-            self._set_overlay_response("JARVIS: Starting document read-through and critique.")
+            self._set_overlay_response("ATLAS: Starting document read-through and critique.")
         threading.Thread(target=self._document_read_and_review_worker, daemon=True).start()
 
     def _document_read_and_review_worker(self) -> None:
@@ -12568,7 +12647,7 @@ document.getElementById('player').appendChild(frame);}
             if not title:
                 message = "I could not find a likely Google Docs, Word, novel, chapter, draft, or manuscript window. Open the document, then ask again."
                 self._append_chat("System", message)
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
                 return
             self._set_command_status(f"Capturing document: {title[:70]}")
             time.sleep(0.5)
@@ -12576,7 +12655,7 @@ document.getElementById('player').appendChild(frame);}
             if not ok:
                 message = f"{capture_message} Click inside the document body once, then ask me again."
                 self._append_chat("System", message)
-                self._set_overlay_response(f"JARVIS: {message}")
+                self._set_overlay_response(f"ATLAS: {message}")
                 self.assistant.record_action("document_read_review", {"window": title}, "medium", False, message, verified=True)
                 return
 
@@ -12589,7 +12668,7 @@ document.getElementById('player').appendChild(frame);}
                 return
 
             self._append_chat("System", f"{capture_message} Reading {word_count} words in {len(chunks)} speech chunks.")
-            self._set_overlay_response(f"JARVIS: Reading {word_count} words. Feedback follows after the final line.")
+            self._set_overlay_response(f"ATLAS: Reading {word_count} words. Feedback follows after the final line.")
             self._set_command_status(f"Reading document aloud: {word_count} words")
             self.speak(f"I captured {word_count} words. Beginning read-through now.")
             for index, chunk in enumerate(chunks, start=1):
@@ -12600,8 +12679,8 @@ document.getElementById('player').appendChild(frame);}
             self._set_status("Thinking...")
             self._set_command_status("Generating honest writing feedback...")
             feedback = self.assistant.review_document_text(document_text, source_title=title)
-            self._append_chat("JARVIS", feedback)
-            self._set_overlay_response(f"JARVIS: {feedback[:900] + ('...' if len(feedback) > 900 else '')}")
+            self._append_chat("ATLAS", feedback)
+            self._set_overlay_response(f"ATLAS: {feedback[:900] + ('...' if len(feedback) > 900 else '')}")
             self.speak("Read-through complete. Here is the honest feedback.")
             self.speak(feedback)
             self.assistant.record_action(
@@ -12615,7 +12694,7 @@ document.getElementById('player').appendChild(frame);}
         except Exception as exc:
             message = f"Document review failed: {exc}"
             self._append_chat("System", message)
-            self._set_overlay_response(f"JARVIS: {message}")
+            self._set_overlay_response(f"ATLAS: {message}")
             self.assistant.record_action("document_read_review", {}, "medium", False, message, verified=True)
         finally:
             self.document_review_running = False
@@ -12673,7 +12752,7 @@ document.getElementById('player').appendChild(frame);}
             self._append_chat("System", "Voice captured. Transcribing now.")
             text = self._transcribe_voice(audio)
             self._append_chat("System", f"Heard: {text}")
-            wake = self.assistant.settings.get("wake_phrase", "jarvis").lower()
+            wake = self.assistant.settings.get("wake_phrase", "atlas").lower()
             if wake not in text.lower() and not text.strip():
                 self._append_chat("System", "I heard something, but not enough to dignify with analysis.")
                 return
@@ -12692,7 +12771,7 @@ document.getElementById('player').appendChild(frame);}
         finally:
             self.is_listening = False
             self._wake_pause.clear()
-            mic_state = f"Wake ready: {str(self.assistant.settings.get('wake_phrase', 'jarvis')).title()}" if self.wake_enabled_var.get() else ("Ready" if self.voice_backend != "unavailable" else "Unavailable")
+            mic_state = f"Wake ready: {str(self.assistant.settings.get('wake_phrase', 'atlas')).title()}" if self.wake_enabled_var.get() else ("Ready" if self.voice_backend != "unavailable" else "Unavailable")
             self._set_mic_status(mic_state)
             self._set_status("Online")
             self._set_command_status("Idle")
@@ -12845,7 +12924,7 @@ document.getElementById('player').appendChild(frame);}
         ledger_count_before = len(self.assistant.action_ledger)
         try:
             role, response = self.assistant.handle_command(text)
-            speaker = "JARVIS" if role in {"assistant", "action"} else "System"
+            speaker = "ATLAS" if role in {"assistant", "action"} else "System"
             if role == "action":
                 if len(self.assistant.action_ledger) == ledger_count_before and not re.search(r"\b(action history|action ledger|recent actions|what did you do)\b", text, re.I):
                     success = self.assistant.action_message_indicates_success(response)
@@ -12859,12 +12938,12 @@ document.getElementById('player').appendChild(frame);}
                 preview = response.strip()
                 if len(preview) > 900:
                     preview = preview[:897] + "..."
-                self._set_overlay_response(f"JARVIS: {preview}")
+                self._set_overlay_response(f"ATLAS: {preview}")
             if self.voice_enabled_var.get() and role != "error":
                 self.speak(response)
         except Exception as exc:
             if source == "overlay":
-                self._set_overlay_response(f"JARVIS: I hit an error: {exc}")
+                self._set_overlay_response(f"ATLAS: I hit an error: {exc}")
             raise
         finally:
             self._set_status("Online")
@@ -12991,11 +13070,11 @@ document.getElementById('player').appendChild(frame);}
             "@{Expression={ if ($_.VoiceInfo.Culture.Name -eq 'en-GB') { 0 } else { 1 } }} | "
             "Select-Object -First 1; "
             "if ($voice) { $synth.SelectVoice($voice.VoiceInfo.Name) }; "
-            "$synth.Speak($env:JARVIS_TTS_TEXT); "
+            "$synth.Speak($env:ATLAS_TTS_TEXT); "
             "$synth.Dispose()"
         )
         env = os.environ.copy()
-        env["JARVIS_TTS_TEXT"] = text
+        env["ATLAS_TTS_TEXT"] = text
         startupinfo = None
         creationflags = 0
         timeout_seconds = max(20, min(90, 18 + len(text) // 18))

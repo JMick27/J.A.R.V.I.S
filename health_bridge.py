@@ -1,4 +1,4 @@
-"""Private local-network health bridge for JARVIS.
+"""Private local-network health bridge for ATLAS.
 
 The bridge accepts small JSON updates from an iPhone Shortcut. It deliberately
 does not contact Apple, Gemini, or any cloud service. Health samples remain in a
@@ -213,7 +213,7 @@ def assess_health_reading(reading: dict[str, Any], history: list[dict[str, Any]]
         return {
             "level": "normal",
             "summary": f"Heart rate {bpm:.0f} BPM while activity is marked as {activity}.",
-            "suggestion": "That context can explain an elevated reading. JARVIS will keep it as a trend, not a diagnosis.",
+            "suggestion": "That context can explain an elevated reading. ATLAS will keep it as a trend, not a diagnosis.",
         }
     if bpm >= 150:
         return {
@@ -280,7 +280,7 @@ class HealthBridgeServer:
                 if self.path.rstrip("/") != "/status":
                     self._reply(404, {"ok": False, "error": "Not found"})
                     return
-                self._reply(200, {"ok": True, "service": "JARVIS Health Bridge"})
+                self._reply(200, {"ok": True, "service": "ATLAS Health Bridge"})
 
             def do_POST(self) -> None:  # noqa: N802
                 if self.path.split("?", 1)[0].rstrip("/") != "/health":
@@ -301,7 +301,11 @@ class HealthBridgeServer:
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     self._reply(400, {"ok": False, "error": "Invalid JSON"})
                     return
-                supplied_token = str(self.headers.get("X-JARVIS-Health-Token") or payload.pop("token", ""))
+                supplied_token = str(
+                    self.headers.get("X-ATLAS-Health-Token")
+                    or self.headers.get("X-JARVIS-Health-Token")
+                    or payload.pop("token", "")
+                )
                 if not secrets.compare_digest(supplied_token, bridge.token):
                     self._reply(401, {"ok": False, "error": "Pairing code rejected"})
                     return

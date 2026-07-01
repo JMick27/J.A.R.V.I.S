@@ -1,4 +1,4 @@
-"""Private local-network phone bridge for JARVIS.
+"""Private local-network phone bridge for ATLAS.
 
 The bridge lets an iPhone Shortcut fetch approved phone-side actions from the
 desktop assistant. It does not send texts, emails, or play music by itself; it
@@ -120,7 +120,7 @@ class PhoneBridgeServer:
                 if not is_private_client(self.client_address[0]):
                     self._reply(403, {"ok": False, "error": "Local-network clients only"})
                     return
-                token = self.headers.get("X-JARVIS-Phone-Token", "")
+                token = self.headers.get("X-ATLAS-Phone-Token", "") or self.headers.get("X-JARVIS-Phone-Token", "")
                 if not token:
                     token = parse_qs(urlparse(self.path).query).get("token", [""])[0]
                 if not secrets.compare_digest(str(token), bridge.token):
@@ -152,7 +152,11 @@ class PhoneBridgeServer:
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     self._reply(400, {"ok": False, "error": "Invalid JSON"})
                     return
-                supplied = str(self.headers.get("X-JARVIS-Phone-Token") or payload.get("token", ""))
+                supplied = str(
+                    self.headers.get("X-ATLAS-Phone-Token")
+                    or self.headers.get("X-JARVIS-Phone-Token")
+                    or payload.get("token", "")
+                )
                 if not secrets.compare_digest(supplied, bridge.token):
                     self._reply(401, {"ok": False, "error": "Pairing code rejected"})
                     return

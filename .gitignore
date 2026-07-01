@@ -17,6 +17,7 @@ jarvis_video_profile/
 jarvis_engine_home.html
 jarvis_video_player.html
 .tmp.drive*/
+.jarvis_backups/
 
 # Python and build output
 __pycache__/

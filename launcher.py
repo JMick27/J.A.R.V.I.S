@@ -1,4 +1,4 @@
-"""JARVIS Launcher: installs, verifies, updates, rolls back, and launches JARVIS."""
+"""ATLAS Launcher: installs, verifies, updates, rolls back, and launches ATLAS."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ MANAGED_INSTALL_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Progr
 MANAGED_LAUNCHER_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs" / "JARVIS Launcher"
 LAUNCHER_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 NEARBY_INSTALL_DIR = LAUNCHER_DIR / APP_FOLDER
-# A launcher shipped beside an existing JARVIS updates that exact installation.
+# A launcher shipped beside an existing ATLAS updates that exact installation.
 # A standalone downloaded launcher uses the normal per-user Programs folder.
 INSTALL_DIR = NEARBY_INSTALL_DIR if (NEARBY_INSTALL_DIR / APP_EXE).exists() else MANAGED_INSTALL_DIR
 LOCAL_VERSION_FILE = INSTALL_DIR / "version.json"
@@ -96,7 +96,7 @@ def missing_prerequisites() -> list[str]:
 class JarvisLauncher(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("JARVIS Launcher")
+        self.title("ATLAS Launcher")
         self.geometry("640x410")
         self.minsize(540, 360)
         self.configure(bg="#030712")
@@ -111,8 +111,8 @@ class JarvisLauncher(tk.Tk):
         style.theme_use("clam")
         style.configure("Jarvis.Horizontal.TProgressbar", troughcolor="#07111f", background="#38bdf8")
 
-        tk.Label(self, text="J.A.R.V.I.S.", bg="#030712", fg="#76e4ff", font=("Segoe UI", 32, "bold")).pack(pady=(36, 2))
-        tk.Label(self, text="DESKTOP SYSTEM LAUNCHER", bg="#030712", fg="#8fb7c8", font=("Segoe UI", 10)).pack()
+        tk.Label(self, text="A.T.L.A.S.", bg="#030712", fg="#76e4ff", font=("Segoe UI", 32, "bold")).pack(pady=(36, 2))
+        tk.Label(self, text="ADAPTIVE TASK, LEARNING & AUTOMATION SYSTEM", bg="#030712", fg="#8fb7c8", font=("Segoe UI", 9)).pack()
         self.status = tk.Label(self, text="Checking systems...", bg="#030712", fg="#e6fbff", font=("Segoe UI", 13))
         self.status.pack(pady=(36, 12))
         self.progress = ttk.Progressbar(self, style="Jarvis.Horizontal.TProgressbar", mode="determinate", maximum=100, length=460)
@@ -122,7 +122,7 @@ class JarvisLauncher(tk.Tk):
 
         buttons = tk.Frame(self, bg="#030712")
         buttons.pack(side="bottom", pady=32)
-        self.launch_button = tk.Button(buttons, text="LAUNCH JARVIS", command=self.launch, state="disabled", bg="#0d2236", fg="#e6fbff", activebackground="#12384f", activeforeground="#ffffff", relief="flat", padx=26, pady=10)
+        self.launch_button = tk.Button(buttons, text="LAUNCH ATLAS", command=self.launch, state="disabled", bg="#0d2236", fg="#e6fbff", activebackground="#12384f", activeforeground="#ffffff", relief="flat", padx=26, pady=10)
         self.launch_button.pack(side="left", padx=8)
         self.update_button = tk.Button(buttons, text="INSTALL UPDATE", command=self.install_update, state="disabled", bg="#075985", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff", relief="flat", padx=26, pady=10)
         self.update_button.pack(side="left", padx=8)
@@ -143,9 +143,9 @@ class JarvisLauncher(tk.Tk):
         threading.Thread(target=self._check_worker, daemon=True).start()
 
     def _check_worker(self) -> None:
-        self.ui("Checking for updates...", "Contacting the JARVIS release channel.", 8)
+        self.ui("Checking for updates...", "Contacting the ATLAS release channel.", 8)
         try:
-            request = urllib.request.Request(RELEASE_API, headers={"User-Agent": "JARVIS-Launcher/0.1"})
+            request = urllib.request.Request(RELEASE_API, headers={"User-Agent": "ATLAS-Launcher/0.1"})
             with urllib.request.urlopen(request, timeout=20) as response:
                 release = json.load(response)
             self.remote_release = release
@@ -161,11 +161,11 @@ class JarvisLauncher(tk.Tk):
                 self.prerequisites_only = False
             elif missing:
                 self.prerequisites_only = True
-                self.ui("Requirements needed", f"JARVIS is current, but {len(missing)} Microsoft prerequisite(s) are missing.", 18)
+                self.ui("Requirements needed", f"ATLAS is current, but {len(missing)} Microsoft prerequisite(s) are missing.", 18)
                 self.after(0, lambda: self.update_button.config(state="normal", text="INSTALL REQUIREMENTS"))
             else:
                 self.prerequisites_only = False
-                self.ui("JARVIS is up to date", f"Version {local} is ready to launch.", 100)
+                self.ui("ATLAS is up to date", f"Version {local} is ready to launch.", 100)
             if installed:
                 self.after(0, lambda: self.launch_button.config(state="normal"))
         except Exception as exc:
@@ -183,7 +183,7 @@ class JarvisLauncher(tk.Tk):
         raise RuntimeError(f"Release asset is missing: {name}")
 
     def _download(self, url: str, destination: Path, start: float, span: float) -> None:
-        request = urllib.request.Request(url, headers={"User-Agent": "JARVIS-Launcher/0.1"})
+        request = urllib.request.Request(url, headers={"User-Agent": "ATLAS-Launcher/0.1"})
         with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as output:
             total = int(response.headers.get("Content-Length", 0))
             received = 0
@@ -194,18 +194,18 @@ class JarvisLauncher(tk.Tk):
                 output.write(chunk)
                 received += len(chunk)
                 percent = (received / total) if total else 0
-                self.ui("Downloading JARVIS...", f"{received / 1_048_576:.1f} MB received", start + span * percent)
+                self.ui("Downloading ATLAS...", f"{received / 1_048_576:.1f} MB received", start + span * percent)
 
     def install_update(self) -> None:
         if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
-            messagebox.showerror("JARVIS Launcher", "JARVIS currently requires 64-bit Windows 10 or Windows 11.")
+            messagebox.showerror("ATLAS Launcher", "ATLAS currently requires 64-bit Windows 10 or Windows 11.")
             return
         self.prerequisites_to_install = missing_prerequisites()
         if self.prerequisites_to_install:
             labels = "\n".join(f"- {PREREQUISITES[key]['label']}" for key in self.prerequisites_to_install)
             approved = messagebox.askyesno(
-                "JARVIS Prerequisites",
-                "JARVIS needs the following Microsoft components:\n\n"
+                "ATLAS Prerequisites",
+                "ATLAS needs the following Microsoft components:\n\n"
                 f"{labels}\n\nInstall them automatically with Windows Package Manager?",
             )
             if not approved:
@@ -221,11 +221,11 @@ class JarvisLauncher(tk.Tk):
             self._install_prerequisites(self.prerequisites_to_install)
             if self.prerequisites_only:
                 self._create_shortcuts()
-                self.ui("Requirements installed", "JARVIS is ready to launch.", 100)
+                self.ui("Requirements installed", "ATLAS is ready to launch.", 100)
                 self.after(0, lambda: self.launch_button.config(state="normal"))
                 self.after(0, lambda: self.update_button.config(state="disabled"))
                 return
-            with tempfile.TemporaryDirectory(prefix="jarvis-update-") as temp_name:
+            with tempfile.TemporaryDirectory(prefix="atlas-update-") as temp_name:
                 temp = Path(temp_name)
                 archive = temp / ZIP_ASSET
                 manifest_path = temp / MANIFEST_ASSET
@@ -246,7 +246,7 @@ class JarvisLauncher(tk.Tk):
                             raise RuntimeError("Update package contains an unsafe path")
                     package.extractall(staging)
                 if not (staging / APP_EXE).exists():
-                    raise RuntimeError("The update package does not contain JARVIS")
+                    raise RuntimeError("The update package does not contain ATLAS")
 
                 self.ui("Installing update...", "Keeping a rollback copy of the previous version.", 84)
                 if backup.exists():
@@ -266,7 +266,7 @@ class JarvisLauncher(tk.Tk):
 
             self._create_shortcuts()
 
-            self.ui("Update complete", "JARVIS is installed and ready.", 100)
+            self.ui("Update complete", "ATLAS is installed and ready.", 100)
             self.after(0, lambda: self.launch_button.config(state="normal"))
             self.after(0, lambda: self.update_button.config(state="disabled"))
         except Exception as exc:
@@ -274,7 +274,7 @@ class JarvisLauncher(tk.Tk):
             self.after(0, lambda: self.update_button.config(state="normal"))
             if (INSTALL_DIR / APP_EXE).exists():
                 self.after(0, lambda: self.launch_button.config(state="normal"))
-            self.after(0, lambda: messagebox.showerror("JARVIS Update", f"The update could not be installed.\n\n{exc}"))
+            self.after(0, lambda: messagebox.showerror("ATLAS Update", f"The update could not be installed.\n\n{exc}"))
 
     def _install_prerequisites(self, prerequisite_keys: list[str]) -> None:
         if not prerequisite_keys:
@@ -314,8 +314,8 @@ class JarvisLauncher(tk.Tk):
                 shutil.copy2(launcher_path, installed_launcher)
             shortcut_target = installed_launcher
         shortcut_locations = [
-            Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop" / "JARVIS Launcher.lnk",
-            Path(os.environ.get("APPDATA", str(Path.home()))) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "JARVIS Launcher.lnk",
+            Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop" / "ATLAS Launcher.lnk",
+            Path(os.environ.get("APPDATA", str(Path.home()))) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "ATLAS Launcher.lnk",
         ]
         shell = win32com.client.Dispatch("WScript.Shell")
         for shortcut_path in shortcut_locations:
@@ -324,13 +324,13 @@ class JarvisLauncher(tk.Tk):
             shortcut.TargetPath = str(shortcut_target)
             shortcut.WorkingDirectory = str(shortcut_target.parent)
             shortcut.IconLocation = f"{shortcut_target},0"
-            shortcut.Description = "Launch and update JARVIS"
+            shortcut.Description = "Launch and update ATLAS"
             shortcut.Save()
 
     def launch(self) -> None:
         executable = INSTALL_DIR / APP_EXE
         if not executable.exists():
-            messagebox.showerror("JARVIS Launcher", "JARVIS is not installed yet.")
+            messagebox.showerror("ATLAS Launcher", "ATLAS is not installed yet.")
             return
         subprocess.Popen([str(executable)], cwd=str(INSTALL_DIR), close_fds=True)
         self.after(300, self.destroy)

@@ -43,7 +43,7 @@ class SpotifyTokenStore:
             raise SpotifySyncError("Windows token encryption is unavailable.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         raw = json.dumps(token).encode("utf-8")
-        protected = win32crypt.CryptProtectData(raw, "JARVIS Spotify", None, None, None, 0)
+        protected = win32crypt.CryptProtectData(raw, "ATLAS Spotify", None, None, None, 0)
         encrypted = protected[1] if isinstance(protected, tuple) else protected
         if not isinstance(encrypted, bytes):
             raise SpotifySyncError("Windows returned an unsupported encrypted-token format.")
@@ -86,7 +86,7 @@ class _OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
             server.event.set()
         body = (
             "<html><body style='background:#030712;color:#d9f7ff;font-family:Segoe UI;padding:40px'>"
-            "<h1>Spotify connected to J.A.R.V.I.S.</h1><p>You may close this tab and return to JARVIS.</p>"
+            "<h1>Spotify connected to A.T.L.A.S.</h1><p>You may close this tab and return to ATLAS.</p>"
             "</body></html>"
         ).encode("utf-8")
         self.send_response(200)

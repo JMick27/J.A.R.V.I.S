@@ -1,6 +1,6 @@
-# JARVIS AI Proxy
+# ATLAS AI Proxy
 
-This Cloudflare Worker keeps the Gemini API key on the server. Public JARVIS
+This Cloudflare Worker keeps the Gemini API key on the server. Public ATLAS
 builds receive only the Worker URL.
 
 ## Deploy

@@ -1,6 +1,6 @@
-# JARVIS Desktop Assistant
+# ATLAS Desktop Assistant
 
-A beginner-friendly Windows desktop AI assistant inspired by the polished, futuristic feeling of JARVIS-style assistants. It supports text commands, voice input, speech output, active-window awareness, safe local actions, and Gemini or OpenAI-backed chat.
+A.T.L.A.S. stands for **Adaptive Task, Learning & Automation System**. It is a beginner-friendly Windows desktop AI assistant with text commands, voice input, speech output, active-window awareness, safe local actions, and Gemini or OpenAI-backed chat.
 
 ## Setup
 
@@ -24,13 +24,13 @@ Voice input uses `sounddevice` by default. The main app can run without it, but 
 pip install -r requirements-voice.txt
 ```
 
-When using the `sounddevice` backend, the **Voice** button listens for up to 10 seconds but normally stops about one second after you finish speaking. Pressing **Voice** or Ctrl + Space while JARVIS is talking interrupts speech immediately and starts a new voice turn.
+When using the `sounddevice` backend, the **Voice** button listens for up to 10 seconds but normally stops about one second after you finish speaking. Pressing **Voice** or Ctrl + Space while ATLAS is talking interrupts speech immediately and starts a new voice turn.
 
-The **Wake** switch is opt-in. When enabled, JARVIS monitors local microphone levels for speech and transcribes detected utterances to check for the configured `wake_phrase` (normally `Jarvis`). Say `Jarvis, open Chrome`, or say `Jarvis` and wait for `Yes?` before giving a follow-up command. Because wake-word matching happens after transcription, detected speech may be sent to the configured Google/Gemini transcription provider while Wake mode is enabled.
+The **Wake** switch is opt-in. When enabled, ATLAS monitors local microphone levels for speech and transcribes detected utterances to check for the configured `wake_phrase` (normally `Atlas`). Say `Atlas, open Chrome`, or say `Atlas` and wait for `Yes?` before giving a follow-up command. Because wake-word matching happens after transcription, detected speech may be sent to the configured Google/Gemini transcription provider while Wake mode is enabled.
 
 If the mic level is near zero, click **Mic** and choose another input device. You can also type `list microphones` and then `use microphone 15` with the device number you want.
 
-If Bluetooth earbuds such as AirPods show a strong peak but still fail transcription, leave `voice_transcription_provider` set to `auto` in `settings.json`. JARVIS tries Google speech recognition first, then falls back to Gemini audio transcription when Google cannot understand the headset audio.
+If Bluetooth earbuds such as AirPods show a strong peak but still fail transcription, leave `voice_transcription_provider` set to `auto` in `settings.json`. ATLAS tries Google speech recognition first, then falls back to Gemini audio transcription when Google cannot understand the headset audio.
 
 PyAudio is optional. If you specifically want PyAudio and it fails on Windows, Python 3.11 or 3.12 is usually easier than very new Python versions. You can also try:
 
@@ -59,7 +59,7 @@ server. See `cloudflare-worker/README.md` for deployment.
 The `.env` file should be here:
 
 ```text
-C:\Path\To\JARVIS\.env
+C:\Path\To\ATLAS\.env
 ```
 
 6. Run the app:
@@ -71,12 +71,12 @@ python jarvis.py
 Or double-click:
 
 ```text
-Launch JARVIS.bat
+Launch ATLAS.bat
 ```
 
 ## Making It Feel Like An App
 
-The easiest launcher is [Launch JARVIS.bat](Launch%20JARVIS.bat). Double-click it from the project folder and it will start JARVIS without typing `python jarvis.py`.
+The easiest launcher is [Launch ATLAS.bat](Launch%20ATLAS.bat). Double-click it from the project folder and it will start ATLAS without typing `python jarvis.py`.
 
 To build a Windows `.exe`, install the build dependency:
 
@@ -96,7 +96,9 @@ If the build succeeds, the executable will be here:
 dist\JARVIS Desktop Assistant\JARVIS Desktop Assistant.exe
 ```
 
-For desktop shortcuts, point the shortcut at `Launch JARVIS.vbs` in the project root instead of the exe inside `dist`. Rebuilds delete and recreate the `dist` folder, which can break shortcuts or pinned taskbar items. The launcher file stays in place and opens the latest rebuilt exe.
+The packaged folder and executable retain their legacy JARVIS filenames so existing launchers, shortcuts, and automatic updates continue working. The application itself is branded A.T.L.A.S.
+
+For desktop shortcuts, point the shortcut at `Launch ATLAS.vbs` in the project root instead of the exe inside `dist`. Rebuilds delete and recreate the `dist` folder, which can break shortcuts or pinned taskbar items. The launcher file stays in place and opens the latest rebuilt exe.
 
 ## Controls
 
@@ -105,29 +107,29 @@ For desktop shortcuts, point the shortcut at `Launch JARVIS.vbs` in the project 
 - If the `keyboard` package can register global hotkeys, Ctrl + Space interrupts speech and starts voice input.
 - Toggle **Wake** for optional wake-phrase listening; it remains off until you enable it.
 - Click **Overlay** or press Ctrl + Alt + J to summon a small always-on-top command bar while using other windows.
-- Click **Watcher** to add project folders JARVIS should monitor for errors.
+- Click **Watcher** to add project folders ATLAS should monitor for errors.
 - Click **Code** in the top bar or type `open coding workspace` to browse, search, preview, and ask Gemini about source files in a selected project.
 - Click **Music** to tune preferred music app, Apple Music automation, vision-assisted play clicks, and fallbacks.
 - Click **Music -> Phone Bridge** or type `phone bridge setup` to let an iPhone Shortcut fetch approved mobile actions, such as playing Apple Music on your phone.
 - Click **Integrations** to enable free integrations, check setup status, and open setup docs.
 - Click **Integrations** then **Apple Health Bridge**, or type `health setup`, to pair an iPhone Shortcut for Apple Watch wellness context.
 - Click **Panels** or the Core/Chat/Side buttons in the Command Center header to collapse sections, restore them, or reset the draggable in-window layout.
-- Click **Missions** to run or save multi-step JARVIS workflows.
+- Click **Missions** to run or save multi-step ATLAS workflows.
 - Click **Hands** to open webcam gesture control. The camera starts only after you press **Start**.
 - Click **Layouts** to switch between saved command-center workspace layouts.
 - Toggle Speak to enable or disable text-to-speech responses.
-- Say or type `run in the background` to hide the main window while keeping JARVIS running. Ctrl + Alt + J can bring up the overlay, and the overlay has a **Main** button to restore the Command Center.
-- Say or type `turn off`, `shut yourself off`, or `close all JARVIS instances` to shut down JARVIS.
+- Say or type `run in the background` to hide the main window while keeping ATLAS running. Ctrl + Alt + J can bring up the overlay, and the overlay has a **Main** button to restore the Command Center.
+- Say or type `turn off`, `shut yourself off`, or `close all ATLAS instances` to shut down ATLAS.
 
 ## Command Center Layout
 
-The main UI uses a Command Center layout with a central animated core, telemetry cards, a chat feed, and a controls/status panel. The `Core`, `Chat`, and `Status` panels have small drag handles, so you can click and drag them around inside the same JARVIS window. Each panel also has a bottom-right resize grip for mouse scaling. Panel positions and sizes are saved in `settings.json`, and the **Panels** manager can reset the layout or restore hidden sections.
+The main UI uses a Command Center layout with a central animated core, telemetry cards, a chat feed, and a controls/status panel. The `Core`, `Chat`, and `Status` panels have small drag handles, so you can click and drag them around inside the same ATLAS window. Each panel also has a bottom-right resize grip for mouse scaling. Panel positions and sizes are saved in `settings.json`, and the **Panels** manager can reset the layout or restore hidden sections.
 
 ## Coding Workspace
 
 Open the code helper with the **Code** button, choose a project folder, and select a source file to preview it. The search box checks both relative file paths and sampled source contents while skipping dependency, cache, backup, build, and version-control folders.
 
-Enter a question such as `What does this class do?` or `Where could this fail?` and press **Explain**. JARVIS sends the selected file and question to Gemini, then places the explanation in the main chat. The selected workspace is saved, but source contents and code questions are not stored as chat history.
+Enter a question such as `What does this class do?` or `Where could this fail?` and press **Explain**. ATLAS sends the selected file and question to Gemini, then places the explanation in the main chat. The selected workspace is saved, but source contents and code questions are not stored as chat history.
 
 Phase 2 adds controlled edits:
 
@@ -137,13 +139,13 @@ Phase 2 adds controlled edits:
 4. Review the unified diff in the preview.
 5. Choose **Apply** or **Discard**.
 
-Apply follows the selected JARVIS permission mode. Ask for approval and Safe Mode show a confirmation before writing. Every successful edit creates a timestamped copy under `.jarvis_backups` inside the selected project. JARVIS also rejects a proposal if the source file changed after the diff was created.
+Apply follows the selected ATLAS permission mode. Ask for approval and Safe Mode show a confirmation before writing. Every successful edit creates a timestamped copy under `.jarvis_backups` inside the selected project. ATLAS also rejects a proposal if the source file changed after the diff was created.
 
 Use **Latest Backup** to preview restoration of the newest backup as another diff. Applying the restoration first backs up the current file, so recovery is reversible too.
 
 **Diagnostics** performs local Python, JSON, and TOML syntax checks, detects unresolved merge markers, identifies the project type, and summarizes source-file types. These checks do not depend on Gemini.
 
-The **Approved runner** menu only shows fixed runners discovered from the project, such as Python `unittest`, Python compile checks, pytest when installed, Node tests, Godot headless checks, or language-native test tools. JARVIS never accepts a generated terminal command or generated arguments. Test runners:
+The **Approved runner** menu only shows fixed runners discovered from the project, such as Python `unittest`, Python compile checks, pytest when installed, Node tests, Godot headless checks, or language-native test tools. ATLAS never accepts a generated terminal command or generated arguments. Test runners:
 
 - use `shell=False`;
 - receive a sanitized environment without secret-like environment variables;
@@ -190,7 +192,7 @@ focus mode; open chrome; play music, you pick; start a focus timer for 25 minute
 
 The **Hands** panel uses the bundled MediaPipe Hand Landmarker model to track 21 three-dimensional hand landmarks locally.
 
-- Wave repeatedly with a clearly open palm: JARVIS says hello after strict motion validation.
+- Wave repeatedly with a clearly open palm: ATLAS says hello after strict motion validation.
 - Hold a stable index-point: a projected finger ray moves the cursor by pointing direction, with landmark smoothing and a jitter dead zone.
 - Pinch your thumb and index finger deliberately: click only when gesture control is **Armed**.
 - **Safe** mode permits greetings and cursor movement but blocks clicks.
@@ -220,10 +222,10 @@ You can also type commands like `open hand control`, `open layouts`, `apply focu
 
 ## Apple Health Bridge Without A Mac
 
-JARVIS can receive Apple Watch health context without a Mac by using your iPhone as the bridge:
+ATLAS can receive Apple Watch health context without a Mac by using your iPhone as the bridge:
 
 ```text
-Apple Watch / Apple Health -> iPhone Shortcut -> local Wi-Fi POST -> JARVIS on this PC
+Apple Watch / Apple Health -> iPhone Shortcut -> local Wi-Fi POST -> ATLAS on this PC
 ```
 
 Open **Integrations** and choose **Apple Health Bridge**, or type:
@@ -241,7 +243,7 @@ The setup panel shows a private local URL and pairing code. Keep your iPhone and
 Recommended iPhone Shortcut:
 
 1. Open **Shortcuts** on your iPhone.
-2. Tap **+** and name the shortcut `Send Health To JARVIS`.
+2. Tap **+** and name the shortcut `Send Health To ATLAS`.
 3. Add **Find Health Samples**.
 4. Set **Type** to **Heart Rate**.
 5. Set sorting to **Start Date**, **Latest First**, and turn on **Limit** with a limit of `1`.
@@ -250,19 +252,19 @@ Recommended iPhone Shortcut:
 8. Add another **Get Details of Health Samples**.
 9. Set **Detail** to **Start Date**. This is the value you will use for `timestamp`.
 10. Add **Get Contents of URL**.
-11. Put the Shortcut URL from JARVIS in the URL field.
+11. Put the Shortcut URL from ATLAS in the URL field.
 12. Tap **Show More**.
 13. Set **Method** to **POST**.
 14. Set **Request Body** to **JSON**.
-15. Add a header named `X-JARVIS-Health-Token` and paste the pairing code from JARVIS.
+15. Add a header named `X-ATLAS-Health-Token` and paste the pairing code from ATLAS.
 16. Under **Request Body -> JSON**, add two rows. For each row, choose **Text** as the field type.
 17. Fill them in like this:
     - Left **Key** box: `heart_rate`; right **Text** box: the **Value** from step 7
     - Left **Key** box: `timestamp`; right **Text** box: the **Start Date** from step 9
-18. Do not add `activity` or `source` unless you already know how to type literal text into Shortcuts. JARVIS will fill those in automatically.
+18. Do not add `activity` or `source` unless you already know how to type literal text into Shortcuts. ATLAS will fill those in automatically.
 19. Run the shortcut once and allow Health permissions when iOS asks.
 
-If Shortcuts sends a value like `82 count/min` instead of plain `82`, JARVIS will extract the number.
+If Shortcuts sends a value like `82 count/min` instead of plain `82`, ATLAS will extract the number.
 
 Supported JSON keys are:
 
@@ -280,13 +282,13 @@ Supported JSON keys are:
 
 Only `heart_rate` is required. `timestamp` is recommended. The other fields are optional.
 
-Health readings are stored locally in a short rolling file and are used only for wellness context. JARVIS does not diagnose stress, illness, or emergencies. If a reading feels wrong or you feel unsafe, use real medical help instead of trusting the laptop with a glowing personality.
+Health readings are stored locally in a short rolling file and are used only for wellness context. ATLAS does not diagnose stress, illness, or emergencies. If a reading feels wrong or you feel unsafe, use real medical help instead of trusting the laptop with a glowing personality.
 
-## JARVIS Phone Bridge
+## ATLAS Phone Bridge
 
-The Phone Bridge lets your iPhone fetch approved phone-side actions from JARVIS. The first supported action is Apple Music playback on your phone.
+The Phone Bridge lets your iPhone fetch approved phone-side actions from ATLAS. The first supported action is Apple Music playback on your phone.
 
-Open **Music -> Phone Bridge**, **Integrations -> JARVIS Phone Bridge**, or type:
+Open **Music -> Phone Bridge**, **Integrations -> ATLAS Phone Bridge**, or type:
 
 ```text
 phone bridge setup
@@ -295,7 +297,7 @@ play Master of Puppets on my phone
 play Bad by Michael Jackson on Apple Music
 ```
 
-When a song request is ambiguous, JARVIS can ask:
+When a song request is ambiguous, ATLAS can ask:
 
 ```text
 Should I play this on this device, or on your mobile device, sir?
@@ -304,11 +306,11 @@ Should I play this on this device, or on your mobile device, sir?
 Recommended iPhone Shortcut:
 
 1. Open **Shortcuts** on your iPhone.
-2. Tap **+** and name it `JARVIS Phone Bridge`.
+2. Tap **+** and name it `ATLAS Phone Bridge`.
 3. Add **Get Contents of URL**.
-4. Put the Phone Bridge Shortcut URL from JARVIS in the URL field.
+4. Put the Phone Bridge Shortcut URL from ATLAS in the URL field.
 5. Tap **Show More**.
-6. Add a header named `X-JARVIS-Phone-Token` and paste the pairing code from JARVIS.
+6. Add a header named `X-ATLAS-Phone-Token` and paste the pairing code from ATLAS.
 7. Add **Get Dictionary Value**.
 8. Set **Key** to `action`, and set **Dictionary** to **Contents of URL**.
 9. Add **If**.
@@ -322,7 +324,7 @@ Recommended iPhone Shortcut:
 17. Add **Get Item from List** and choose **First Item**.
 18. Add **Play Music** using that first item.
 
-Run the Shortcut after JARVIS queues a mobile request. Keep your iPhone and PC on the same Wi-Fi. If Windows asks about firewall access, allow private networks.
+Run the Shortcut after ATLAS queues a mobile request. Keep your iPhone and PC on the same Wi-Fi. If Windows asks about firewall access, allow private networks.
 
 ## Example Commands
 
@@ -338,28 +340,28 @@ Run the Shortcut after JARVIS queues a mobile request. Keep your iPhone and PC o
 - `Can you open Apple Music and search my song?` then reply with the song name.
 - `Open Apple Music and search for Bad by Michael Jackson`
 - `Play Jackson's playlist on Apple Music` opens a matching playlist from your library and verifies playback before claiming success.
-- `Open JARVIS Music Player` opens the built-in local music panel.
-- `Play Road Trip in JARVIS Music Player` plays one unambiguous saved song or playlist.
+- `Open ATLAS Music Player` opens the built-in local music panel.
+- `Play Road Trip in ATLAS Music Player` plays one unambiguous saved song or playlist.
 
-### JARVIS Music Player
+### ATLAS Music Player
 
-The built-in player handles local MP3, WAV, OGG, FLAC, M4A, and AAC files without opening another music app. Open the panel, use **Add Songs** or **Add Folder**, select tracks to create named playlists, and use the **Startup** tab to choose one song or playlist to play automatically when JARVIS opens. Startup autoplay is off until you explicitly select something.
+The built-in player handles local MP3, WAV, OGG, FLAC, M4A, and AAC files without opening another music app. Open the panel, use **Add Songs** or **Add Folder**, select tracks to create named playlists, and use the **Startup** tab to choose one song or playlist to play automatically when ATLAS opens. Startup autoplay is off until you explicitly select something.
 
-Removing a song from JARVIS Music or deleting a JARVIS playlist never deletes the original audio files.
+Removing a song from ATLAS Music or deleting a ATLAS playlist never deletes the original audio files.
 
 ### Spotify Library Sync
 
-JARVIS can sync Spotify playlists and saved tracks, then open an exact synced item in Spotify without guessing at search results.
+ATLAS can sync Spotify playlists and saved tracks, then open an exact synced item in Spotify without guessing at search results.
 
 1. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
 2. Add this redirect URI exactly: `http://127.0.0.1:8767/callback`
 3. Copy the app's Client ID. A client secret is not used or needed.
-4. Open **JARVIS Music -> Spotify**, paste the Client ID, and select **Connect**.
+4. Open **ATLAS Music -> Spotify**, paste the Client ID, and select **Connect**.
 5. Approve read-only playlist and saved-track access in the browser.
 
 The OAuth token is encrypted for the current Windows account using Windows DPAPI and is not stored in `settings.json`. You can set `SPOTIFY_CLIENT_ID` in `.env` instead of pasting it. Commands include `sync my Spotify library` and `play Road Trip from my Spotify library`.
 
-Spotify streams remain in Spotify; JARVIS does not download or copy them into the local-file player. Apple Music library sync requires Apple's MusicKit developer-token system and subscriber authorization, so the Windows build continues using its existing Apple Music automation unless those credentials are configured in a future integration.
+Spotify streams remain in Spotify; ATLAS does not download or copy them into the local-file player. Apple Music library sync requires Apple's MusicKit developer-token system and subscriber authorization, so the Windows build continues using its existing Apple Music automation unless those credentials are configured in a future integration.
 - `Play Master of Puppets by Metallica`
 - `Play Master of Puppets on my phone`
 - `Phone bridge setup`
@@ -371,7 +373,7 @@ Spotify streams remain in Spotify; JARVIS does not download or copy them into th
 - `Minimize this window`
 - `Maximize this window`
 - `Close this window` then `confirm`
-- `Copy clipboard to hello from JARVIS`
+- `Copy clipboard to hello from ATLAS`
 - `Read clipboard`
 - `Paste clipboard`
 - `Type hello there`
@@ -432,9 +434,9 @@ Spotify streams remain in Spotify; JARVIS does not download or copy them into th
 
 ## Laptop Access and Safety
 
-JARVIS has a controlled set of local actions. He can open whitelisted apps, folders, websites, Windows Settings pages, control volume/media keys, manage the active window, smoothly move/click the mouse when you give explicit coordinates or directions, type/paste into the focused field, use the clipboard, take screenshots, create folders in known safe locations, list recent items in known folders, and report basic system status.
+ATLAS has a controlled set of local actions. He can open whitelisted apps, folders, websites, Windows Settings pages, control volume/media keys, manage the active window, smoothly move/click the mouse when you give explicit coordinates or directions, type/paste into the focused field, use the clipboard, take screenshots, create folders in known safe locations, list recent items in known folders, and report basic system status.
 
-Location and directions are opt-in. Say `set my location to ...` to save a manual start point, or say `enable approximate IP location` if you want city-level lookup from your internet connection. Startup refresh can be enabled with `turn on startup location`; when enabled, JARVIS updates an approximate IP-based location when the app opens and reports the readable city/region/country instead of raw coordinates. Exact street-address reverse geocoding, nearby business lookup, fastest-route details, and exact ETA text require `GOOGLE_MAPS_API_KEY` in `.env` with the Geocoding API, Places API, Directions API, and Distance Matrix API enabled; otherwise Google Maps will show the live ETA in the browser.
+Location and directions are opt-in. Say `set my location to ...` to save a manual start point, or say `enable approximate IP location` if you want city-level lookup from your internet connection. Startup refresh can be enabled with `turn on startup location`; when enabled, ATLAS updates an approximate IP-based location when the app opens and reports the readable city/region/country instead of raw coordinates. Exact street-address reverse geocoding, nearby business lookup, fastest-route details, and exact ETA text require `GOOGLE_MAPS_API_KEY` in `.env` with the Geocoding API, Places API, Directions API, and Distance Matrix API enabled; otherwise Google Maps will show the live ETA in the browser.
 
 Proactive monitoring watches laptop vitals in the background while the app is open. It updates the side panel with CPU, RAM, disk, battery, internet, and active-window focus time. It can alert you if CPU/RAM/disk get high, battery gets low, internet drops or returns, power state changes, or you spend a long session in one window. Use `awareness status`, `turn off monitoring`, or `turn on monitoring`.
 
@@ -476,7 +478,7 @@ OBS_WEBSOCKET_URL=ws://127.0.0.1:4455
 
 ## Agent Tool System
 
-JARVIS includes an agent-based tool layer for broader tasks that do not have a hardcoded command. Existing direct commands still work, but agent mode lets Gemini plan one approved tool call at a time, observe the result, and continue until the task is done or confirmation is needed.
+ATLAS includes an agent-based tool layer for broader tasks that do not have a hardcoded command. Existing direct commands still work, but agent mode lets Gemini plan one approved tool call at a time, observe the result, and continue until the task is done or confirmation is needed.
 
 The approved tools are:
 
@@ -499,12 +501,12 @@ The approved tools are:
 
 Safety rules:
 
-- JARVIS does not run arbitrary terminal commands.
+- ATLAS does not run arbitrary terminal commands.
 - Safe tools can run immediately.
 - Medium-risk tools can require confirmation, especially when they affect files, settings, typing, browsers, or external apps.
 - High-risk tools always require confirmation.
 - Deleting files, moving files, entering private info, sending messages, buying things, or changing passwords should never happen without confirmation.
-- JARVIS should not say an action succeeded unless a local function or Windows API reports success.
+- ATLAS should not say an action succeeded unless a local function or Windows API reports success.
 
 Useful commands:
 
@@ -515,20 +517,20 @@ Useful commands:
 - `tool mode list folder C:\Users\YourName\Downloads`
 - `action history`
 
-## JARVIS Polish Layer
+## ATLAS Polish Layer
 
-On launch, JARVIS runs a short startup sequence showing and optionally speaking subsystem status:
+On launch, ATLAS runs a short startup sequence showing and optionally speaking subsystem status:
 
-- Initializing J.A.R.V.I.S.
+- Initializing A.T.L.A.S.
 - Voice system status
 - Vision system status
 - Mouse control safe mode
 - Gemini connection status
 - Time-aware greeting using the name entered during first-run setup
 
-After the technical boot animation, first-time users are asked what JARVIS should call them before the main interface becomes active.
+After the technical boot animation, first-time users are asked what ATLAS should call them before the main interface becomes active.
 
-Startup diagnostic messages are visual-only by default. `startup_greeting_speak` controls the short spoken greeting, while `startup_sequence_speak` is kept off so JARVIS does not read every subsystem line aloud.
+Startup diagnostic messages are visual-only by default. `startup_greeting_speak` controls the short spoken greeting, while `startup_sequence_speak` is kept off so ATLAS does not read every subsystem line aloud.
 
 The side status panel includes online/listening/thinking/acting/speaking status, current mode, current window, vision, voice, mouse control, music, last action, last verified action, and risk level.
 
@@ -547,9 +549,9 @@ Personality is controlled by `personality.json`, not by API keys. You can edit a
 
 He does **not** execute arbitrary terminal commands from AI responses. Riskier actions such as closing the active window or locking the laptop require a follow-up `confirm`.
 
-Screen vision uses a screenshot of your current display and sends it to Gemini for analysis. Use commands like `look at my screen`, `read my screen`, or `what should I click?`. JARVIS can describe visible UI and suggest where to click, but he will not claim to have clicked anything unless a local action actually does it.
+Screen vision uses a screenshot of your current display and sends it to Gemini for analysis. Use commands like `look at my screen`, `read my screen`, or `what should I click?`. ATLAS can describe visible UI and suggest where to click, but he will not claim to have clicked anything unless a local action actually does it.
 
-When proactive monitoring is enabled, JARVIS can notice writing-focused windows such as Google Docs, Word, novel drafts, outlines, or chapters and lightly ask whether you want help with dialogue, pacing, worldbuilding, or scene work. This is controlled by `writing_assist_prompt_enabled` and `writing_assist_prompt_cooldown_minutes` in `settings.json`.
+When proactive monitoring is enabled, ATLAS can notice writing-focused windows such as Google Docs, Word, novel drafts, outlines, or chapters and lightly ask whether you want help with dialogue, pacing, worldbuilding, or scene work. This is controlled by `writing_assist_prompt_enabled` and `writing_assist_prompt_cooldown_minutes` in `settings.json`.
 
 Writing review commands can read the active document aloud and then give honest feedback:
 
@@ -558,7 +560,7 @@ Writing review commands can read the active document aloud and then give honest 
 - `critique my novel`
 - `give feedback on my writing`
 
-JARVIS tries to focus a likely Google Docs, Word, novel, chapter, draft, or manuscript window, copies the document text with Ctrl+A/C, restores your clipboard text afterward, reads the draft aloud, then sends the captured text to Gemini for critique. The feedback covers what worked, what needs work, the strongest moment, and next revision moves. `document_review_max_chars` limits how much text is sent to Gemini for feedback, and `document_read_chunk_chars` controls speech chunk size.
+ATLAS tries to focus a likely Google Docs, Word, novel, chapter, draft, or manuscript window, copies the document text with Ctrl+A/C, restores your clipboard text afterward, reads the draft aloud, then sends the captured text to Gemini for critique. The feedback covers what worked, what needs work, the strongest moment, and next revision moves. `document_review_max_chars` limits how much text is sent to Gemini for feedback, and `document_read_chunk_chars` controls speech chunk size.
 
 ## Customization
 
@@ -635,9 +637,9 @@ The first run creates `settings.json`. You can edit:
 
 Do not put API keys or passwords in `settings.json`.
 
-When running the packaged `.exe`, JARVIS stores editable settings and explicit memories in your Windows app-data folder so manually added apps, Steam games, and memories survive app rebuilds. It does not save the chat transcript.
+When running the packaged `.exe`, ATLAS stores editable settings and explicit memories in your Windows app-data folder so manually added apps, Steam games, and memories survive app rebuilds. It does not save the chat transcript.
 
-When `auto_select_gemini_model` is `true`, JARVIS checks the Gemini models your key can see when the app starts, picks the newest usable Flash-style text model, and falls back to older models if the selected one hits quota or availability limits.
+When `auto_select_gemini_model` is `true`, ATLAS checks the Gemini models your key can see when the app starts, picks the newest usable Flash-style text model, and falls back to older models if the selected one hits quota or availability limits.
 
 To customize app launching, edit `custom_app_paths` in `settings.json`. Use the full path to the app's `.exe` or Start Menu `.lnk` shortcut. Example:
 
@@ -653,7 +655,7 @@ To customize app launching, edit `custom_app_paths` in `settings.json`. Use the 
 
 The app launcher is intentionally whitelisted so the assistant cannot run arbitrary terminal commands.
 
-You can also add apps from inside JARVIS:
+You can also add apps from inside ATLAS:
 
 1. Click **Apps**.
 2. Enter a name, such as `Blender`.
@@ -661,7 +663,7 @@ You can also add apps from inside JARVIS:
 4. Click **Add To Whitelist**.
 5. Use commands like `open blender`.
 
-To customize what JARVIS picks when you say `play music, you pick`, edit `playlist_overrides` in `settings.json`. Supported categories are `coding`, `gamedev`, `browser`, `study`, `gaming`, `creative`, and `general`.
+To customize what ATLAS picks when you say `play music, you pick`, edit `playlist_overrides` in `settings.json`. Supported categories are `coding`, `gamedev`, `browser`, `study`, `gaming`, `creative`, and `general`.
 
 ```json
 "playlist_overrides": {
@@ -673,7 +675,7 @@ To customize what JARVIS picks when you say `play music, you pick`, edit `playli
 }
 ```
 
-Apple Music note: the Windows Apple Music app does not expose a reliable public local API for "play this exact searched song" control. JARVIS uses the most practical free path: launch Apple Music, search, use screen vision/UI automation to select the best match, click Play, and verify playback. A more direct integration would require a different provider with playback APIs, classic iTunes COM support for local/library tracks, or a MusicKit web player setup with Apple developer credentials.
+Apple Music note: the Windows Apple Music app does not expose a reliable public local API for "play this exact searched song" control. ATLAS uses the most practical free path: launch Apple Music, search, use screen vision/UI automation to select the best match, click Play, and verify playback. A more direct integration would require a different provider with playback APIs, classic iTunes COM support for local/library tracks, or a MusicKit web player setup with Apple developer credentials.
 
 You can save explicit memories without saving chat:
 
@@ -692,12 +694,12 @@ Steam games are whitelisted separately because Steam launches games by App ID:
 
 You can find a game's App ID in its Steam store page URL. For example, `https://store.steampowered.com/app/413150/Stardew_Valley/` uses App ID `413150`.
 
-Apple Music from the Microsoft Store is controlled with best-effort Windows UI automation plus screen vision. JARVIS searches Apple Music, inspects the visible results with Gemini vision, clicks the visually verified matching song result, then inspects the screen again and clicks the visible Play button if it can verify one. If he cannot verify a match or a safe Play button, he refuses to press Play so he does not start a random song.
+Apple Music from the Microsoft Store is controlled with best-effort Windows UI automation plus screen vision. ATLAS searches Apple Music, inspects the visible results with Gemini vision, clicks the visually verified matching song result, then inspects the screen again and clicks the visible Play button if it can verify one. If he cannot verify a match or a safe Play button, he refuses to press Play so he does not start a random song.
 
-If vision points too close to the right edge of Apple Music, JARVIS treats that as the scrollbar and redirects the click to a safer point inside the matching song row.
+If vision points too close to the right edge of Apple Music, ATLAS treats that as the scrollbar and redirects the click to a safer point inside the matching song row.
 
 To customize music, edit `PLAYLISTS` in `jarvis.py`. The current URLs are safe placeholder YouTube searches and Spotify search URIs you can replace with your favorite playlist links.
 
 ## Safety Notes
 
-JARVIS does not execute commands generated by the AI. Local actions are handled by Python functions and whitelisted command handlers. Risky features such as deleting files, shutting down, restarting, or closing apps are intentionally not implemented by default.
+ATLAS does not execute commands generated by the AI. Local actions are handled by Python functions and whitelisted command handlers. Risky features such as deleting files, shutting down, restarting, or closing apps are intentionally not implemented by default.

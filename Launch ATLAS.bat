@@ -9,7 +9,7 @@ if exist "%ATLAS_EXE%" (
     exit /b 0
 )
 
-echo Packaged ATLAS exe was not found. Falling back to Python source.
+echo Packaged ATLAS executable was not found. Falling back to Python source.
 
 if exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" jarvis.py
