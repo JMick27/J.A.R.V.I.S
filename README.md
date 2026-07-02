@@ -176,6 +176,25 @@ discard the code edit
 ```
 
 The workspace still cannot run arbitrary terminal commands.
+
+## Optional Creator Tips
+
+ATLAS can occasionally add an optional creator-tip note after it successfully completes a request. The default chance is 1 in 20, followed by a 72-hour cooldown that persists across restarts. It stays completely disabled in practice until public payment details are configured.
+
+Edit these values in `settings.json`:
+
+```json
+{
+  "creator_tip_enabled": true,
+  "creator_tip_crypto_name": "Litecoin (LTC)",
+  "creator_tip_crypto_network": "Litecoin mainnet",
+  "creator_tip_address": "YOUR_PUBLIC_RECEIVING_ADDRESS",
+  "creator_tip_payment_uri": "litecoin:YOUR_PUBLIC_RECEIVING_ADDRESS"
+}
+```
+
+Use a public receiving address from the wallet's **Receive** screen. The payment URI is optional but makes compatible wallet links easier to open. Never put a seed phrase, recovery phrase, private key, wallet password, or exchange login in ATLAS.
+
 ## Mission Dashboard
 
 The **Missions** dashboard runs saved multi-step workflows through the same safe command router as normal chat commands. Risky steps still pause for confirmation, and every mission writes a final summary into the chat.

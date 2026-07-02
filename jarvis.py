@@ -25,6 +25,7 @@ import os
 import platform
 import queue
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -136,7 +137,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.4.1"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -476,6 +477,14 @@ DEFAULT_SETTINGS = {
     "agent_max_steps": 6,
     "agent_permission_mode": "Ask for approval",
     "agent_require_confirmation_for_medium": True,
+    "creator_tip_enabled": True,
+    "creator_tip_crypto_name": "Litecoin (LTC)",
+    "creator_tip_crypto_network": "Litecoin mainnet",
+    "creator_tip_address": "ltc1qzwzah5z0sqjp8pvfazd7q3hetwx3ktqmcetcy4",
+    "creator_tip_payment_uri": "litecoin:ltc1qzwzah5z0sqjp8pvfazd7q3hetwx3ktqmcetcy4",
+    "creator_tip_chance_denominator": 20,
+    "creator_tip_cooldown_hours": 72,
+    "creator_tip_last_shown_at": "",
     "location_enabled": False,
     "location_provider": "manual",
     "manual_location": "",
@@ -946,6 +955,47 @@ def save_settings(settings: dict[str, Any]) -> None:
     safe_settings.pop("OPENAI_API_KEY", None)
     safe_settings.pop("GEMINI_API_KEY", None)
     SETTINGS_PATH.write_text(json.dumps(safe_settings, indent=2), encoding="utf-8")
+
+
+def creator_tip_message(settings: dict[str, Any], now: dt.datetime | None = None, roll: int | None = None) -> str:
+    """Return the occasional creator-tip message, or an empty string when it should stay quiet."""
+    if not bool(settings.get("creator_tip_enabled", True)):
+        return ""
+    crypto_name = str(settings.get("creator_tip_crypto_name", "")).strip()
+    address = str(settings.get("creator_tip_address", "")).strip()
+    if not crypto_name or not address:
+        return ""
+
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    cooldown_hours = max(1, int(settings.get("creator_tip_cooldown_hours", 72) or 72))
+    last_value = str(settings.get("creator_tip_last_shown_at", "")).strip()
+    if last_value:
+        try:
+            last_shown = dt.datetime.fromisoformat(last_value.replace("Z", "+00:00"))
+            if last_shown.tzinfo is None:
+                last_shown = last_shown.replace(tzinfo=dt.timezone.utc)
+            if current - last_shown < dt.timedelta(hours=cooldown_hours):
+                return ""
+        except ValueError:
+            pass
+
+    denominator = max(1, int(settings.get("creator_tip_chance_denominator", 20) or 20))
+    selected_roll = secrets.randbelow(denominator) if roll is None else int(roll)
+    if selected_roll != 0:
+        return ""
+
+    network = str(settings.get("creator_tip_crypto_network", "")).strip()
+    payment_uri = str(settings.get("creator_tip_payment_uri", "")).strip()
+    method = crypto_name + (f" on {network}" if network else "")
+    payment = payment_uri or address
+    settings["creator_tip_last_shown_at"] = current.astimezone(dt.timezone.utc).isoformat()
+    return (
+        "By the way, did you know that I was created by a 14-year-old? "
+        "He would very much appreciate an optional tip. For privacy, he only accepts cryptocurrency. "
+        f"{method}: {payment}"
+    )
 
 
 def load_personality() -> dict[str, Any]:
@@ -4451,6 +4501,14 @@ class JarvisAssistant:
             "error",
         ]
         return not any(term in lowered for term in failure_terms)
+
+    def maybe_creator_tip(self, role: str, response: str) -> str:
+        if role not in {"assistant", "action"} or not self.action_message_indicates_success(response):
+            return ""
+        message = creator_tip_message(self.settings)
+        if message:
+            save_settings(self.settings)
+        return message
 
     def _action_history(self, _match: re.Match[str], _text: str) -> str:
         if not self.action_ledger:
@@ -13253,6 +13311,9 @@ document.getElementById('player').appendChild(frame);}
                     self.assistant.last_action = text[:80]
                     if self.assistant.last_risk not in {"medium", "high"}:
                         self.assistant.last_risk = "safe"
+            tip_message = self.assistant.maybe_creator_tip(role, response)
+            if tip_message:
+                response = f"{response}\n\n{tip_message}"
             self._append_chat(speaker, response)
             if source == "overlay":
                 preview = response.strip()
