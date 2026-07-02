@@ -137,7 +137,7 @@ UI_GREEN = "#70f0bf"
 UI_AMBER = "#f8c471"
 UI_MAGENTA = "#c084fc"
 UI_DANGER = "#7b2633"
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.4.2"
 DEFAULT_AI_PROXY_URL = ""
 DEFAULT_NEWS_FEEDS = {
     "Top Stories": [
@@ -6609,6 +6609,7 @@ class JarvisApp(ctk.CTk):
             value=f"Project: {Path(saved_code_workspace).name}" if saved_code_workspace else "No project selected"
         )
         self.code_selected_path: Path | None = None
+        self.tip_card: ctk.CTkFrame | None = None
         self._drag_panel_offsets: dict[str, tuple[int, int]] = {}
         self._resize_panel_state: dict[str, dict[str, float]] = {}
         self._session_panel_layout: dict[str, dict[str, float]] = json.loads(json.dumps(DEFAULT_DRAGGABLE_PANEL_LAYOUT))
@@ -6786,6 +6787,95 @@ class JarvisApp(ctk.CTk):
         self.clipboard_clear()
         self.clipboard_append(value)
         self._append_chat("System", f"Copied {label} to clipboard.")
+
+    def _toggle_tip_card(self) -> None:
+        if self.tip_card is not None and self.tip_card.winfo_exists() and self.tip_card.winfo_ismapped():
+            self.tip_card.place_forget()
+            return
+        if self.tip_card is None or not self.tip_card.winfo_exists():
+            card = ctk.CTkFrame(
+                self,
+                width=390,
+                height=238,
+                fg_color=UI_PANEL_DEEP,
+                corner_radius=8,
+                border_width=1,
+                border_color=UI_CYAN,
+            )
+            card.grid_propagate(False)
+            card.grid_columnconfigure(0, weight=1)
+            self.tip_card = card
+
+            title_bar = ctk.CTkFrame(card, fg_color=UI_PANEL, corner_radius=7)
+            title_bar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 5))
+            title_bar.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(
+                title_bar,
+                text="SUPPORT THE CREATOR",
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color=UI_CYAN,
+                anchor="w",
+            ).grid(row=0, column=0, sticky="ew", padx=10, pady=8)
+            ctk.CTkButton(
+                title_bar,
+                text="X",
+                width=30,
+                height=26,
+                fg_color=UI_CARD,
+                hover_color=UI_DANGER,
+                command=lambda: card.place_forget(),
+            ).grid(row=0, column=1, padx=7)
+
+            ctk.CTkLabel(
+                card,
+                text="Optional Litecoin tip",
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color=UI_TEXT,
+            ).grid(row=1, column=0, sticky="w", padx=16, pady=(8, 2))
+            ctk.CTkLabel(
+                card,
+                text="Litecoin mainnet public receive address",
+                text_color=UI_MUTED,
+                anchor="w",
+            ).grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 5))
+            address = str(self.assistant.settings.get("creator_tip_address", "")).strip()
+            address_box = ctk.CTkTextbox(
+                card,
+                height=58,
+                wrap="char",
+                font=ctk.CTkFont(family="Consolas", size=11),
+                fg_color="#050b13",
+                text_color=UI_TEXT,
+                border_width=1,
+                border_color=UI_BORDER_SOFT,
+            )
+            address_box.grid(row=3, column=0, sticky="ew", padx=16, pady=4)
+            address_box.insert("1.0", address or "No tip address configured.")
+            address_box.configure(state="disabled")
+
+            actions = ctk.CTkFrame(card, fg_color="transparent")
+            actions.grid(row=4, column=0, sticky="ew", padx=13, pady=(7, 12))
+            ctk.CTkButton(
+                actions,
+                text="Copy Address",
+                width=112,
+                fg_color=UI_BORDER,
+                hover_color="#2898c5",
+                command=lambda: self._copy_to_clipboard(address, "Litecoin address"),
+            ).pack(side="left", padx=3)
+            payment_uri = str(self.assistant.settings.get("creator_tip_payment_uri", "")).strip()
+            ctk.CTkButton(
+                actions,
+                text="Copy Payment Link",
+                width=138,
+                fg_color=UI_CARD,
+                hover_color=UI_BORDER_SOFT,
+                command=lambda: self._copy_to_clipboard(payment_uri or address, "Litecoin payment link"),
+            ).pack(side="left", padx=3)
+            ctk.CTkLabel(actions, text="LTC", text_color=UI_AMBER, font=ctk.CTkFont(weight="bold")).pack(side="right", padx=8)
+
+        self.tip_card.place(relx=1.0, rely=1.0, anchor="se", x=-18, y=-84)
+        self.tip_card.lift()
 
     def _send_test_health_reading(self) -> None:
         try:
@@ -7635,7 +7725,19 @@ class JarvisApp(ctk.CTk):
         voice_toggle = ctk.CTkSwitch(input_frame, text="Speak", variable=self.voice_enabled_var)
         voice_toggle.grid(row=0, column=3, padx=6, pady=16)
         wake_toggle = ctk.CTkSwitch(input_frame, text="Wake", variable=self.wake_enabled_var, command=self._toggle_wake_listener)
-        wake_toggle.grid(row=0, column=4, padx=(6, 18), pady=16)
+        wake_toggle.grid(row=0, column=4, padx=6, pady=16)
+        ctk.CTkButton(
+            input_frame,
+            text="Tips",
+            width=66,
+            height=36,
+            fg_color="#174a62",
+            hover_color="#216b89",
+            border_width=1,
+            border_color=UI_CYAN,
+            text_color=UI_TEXT,
+            command=self._toggle_tip_card,
+        ).grid(row=0, column=5, padx=(6, 18), pady=16)
 
         self._setup_draggable_command_panels()
         self._apply_command_center_visibility()

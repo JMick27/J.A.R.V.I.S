@@ -118,6 +118,7 @@ For desktop shortcuts, point the shortcut at `Launch ATLAS.vbs` in the project r
 - Click **Hands** to open webcam gesture control. The camera starts only after you press **Start**.
 - Click **Layouts** to switch between saved command-center workspace layouts.
 - Toggle Speak to enable or disable text-to-speech responses.
+- Click **Tips** at the bottom-right to open the in-app Litecoin support card and copy the public receiving address or payment link.
 - Say or type `run in the background` to hide the main window while keeping ATLAS running. Ctrl + Alt + J can bring up the overlay, and the overlay has a **Main** button to restore the Command Center.
 - Say or type `turn off`, `shut yourself off`, or `close all ATLAS instances` to shut down ATLAS.
 

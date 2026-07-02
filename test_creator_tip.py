@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import unittest
+from pathlib import Path
 
 import jarvis
 
@@ -60,6 +61,12 @@ class CreatorTipTests(unittest.TestCase):
             jarvis.DEFAULT_SETTINGS["creator_tip_payment_uri"],
             "litecoin:ltc1qzwzah5z0sqjp8pvfazd7q3hetwx3ktqmcetcy4",
         )
+
+    def test_main_ui_includes_in_app_tip_card(self) -> None:
+        source = Path(jarvis.__file__).read_text(encoding="utf-8")
+        self.assertIn('text="Tips"', source)
+        self.assertIn("def _toggle_tip_card", source)
+        self.assertIn('text="Copy Address"', source)
 
 
 if __name__ == "__main__":
